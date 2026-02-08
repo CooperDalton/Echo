@@ -1,112 +1,208 @@
-import { Image } from 'expo-image';
-import { Platform, StyleSheet } from 'react-native';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { Animated, Easing, ScrollView, StyleSheet, TextInput, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { Collapsible } from '@/components/ui/collapsible';
-import { ExternalLink } from '@/components/external-link';
-import ParallaxScrollView from '@/components/parallax-scroll-view';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
-import { IconSymbol } from '@/components/ui/icon-symbol';
-import { Fonts } from '@/constants/theme';
+import { BUCKET_COLORS, type BucketName } from '@/constants/buckets';
+import { Colors } from '@/constants/theme';
+import { useColorScheme } from '@/hooks/use-color-scheme';
 
-export default function TabTwoScreen() {
+const recentNotes: { title: string; body: string; bucket: BucketName }[] = [
+  {
+    title: 'Make “Echo” feel ambient',
+    body: 'The app should surface ideas without feeling like reminders. Use calm language.',
+    bucket: 'Systems',
+  },
+  {
+    title: 'Widget text',
+    body: 'If the note is long, keep a single sentence with exact meaning.',
+    bucket: 'Reflections',
+  },
+  {
+    title: 'Buckets are semantic',
+    body: 'No status or task labels. Keep the list flat.',
+    bucket: 'Business Ideas',
+  },
+];
+
+function bucketTone(bucket: BucketName, colorScheme: 'light' | 'dark') {
+  const color = BUCKET_COLORS[bucket];
+  return colorScheme === 'dark'
+    ? { bg: color.darkBg, border: color.darkBorder, text: color.darkText }
+    : { bg: color.lightBg, border: color.lightBorder, text: color.lightText };
+}
+
+export default function LibraryScreen() {
+  const colorScheme = useColorScheme() ?? 'light';
+  const insets = useSafeAreaInsets();
+  const palette = Colors[colorScheme];
+  const [searchQuery, setSearchQuery] = useState('');
+  const [showSearch, setShowSearch] = useState(false);
+  const trimmedQuery = searchQuery.trim().toLowerCase();
+  const searchAnim = useRef(new Animated.Value(0)).current;
+
+  const filteredNotes = useMemo(() => {
+    if (!trimmedQuery) {
+      return recentNotes;
+    }
+
+    return recentNotes.filter((note) =>
+      `${note.title} ${note.body} ${note.bucket}`.toLowerCase().includes(trimmedQuery)
+    );
+  }, [trimmedQuery]);
+
+  useEffect(() => {
+    Animated.timing(searchAnim, {
+      toValue: showSearch ? 1 : 0,
+      duration: 180,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: true,
+    }).start();
+  }, [searchAnim, showSearch]);
+
+  const searchTranslateY = searchAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: [-8, 0],
+  });
+
   return (
-    <ParallaxScrollView
-      headerBackgroundColor={{ light: '#D0D0D0', dark: '#353636' }}
-      headerImage={
-        <IconSymbol
-          size={310}
-          color="#808080"
-          name="chevron.left.forwardslash.chevron.right"
-          style={styles.headerImage}
-        />
-      }>
-      <ThemedView style={styles.titleContainer}>
-        <ThemedText
-          type="title"
-          style={{
-            fontFamily: Fonts.rounded,
-          }}>
-          Explore
-        </ThemedText>
-      </ThemedView>
-      <ThemedText>This app includes example code to help you get started.</ThemedText>
-      <Collapsible title="File-based routing">
-        <ThemedText>
-          This app has two screens:{' '}
-          <ThemedText type="defaultSemiBold">app/(tabs)/index.tsx</ThemedText> and{' '}
-          <ThemedText type="defaultSemiBold">app/(tabs)/explore.tsx</ThemedText>
-        </ThemedText>
-        <ThemedText>
-          The layout file in <ThemedText type="defaultSemiBold">app/(tabs)/_layout.tsx</ThemedText>{' '}
-          sets up the tab navigator.
-        </ThemedText>
-        <ExternalLink href="https://docs.expo.dev/router/introduction">
-          <ThemedText type="link">Learn more</ThemedText>
-        </ExternalLink>
-      </Collapsible>
-      <Collapsible title="Android, iOS, and web support">
-        <ThemedText>
-          You can open this project on Android, iOS, and the web. To open the web version, press{' '}
-          <ThemedText type="defaultSemiBold">w</ThemedText> in the terminal running this project.
-        </ThemedText>
-      </Collapsible>
-      <Collapsible title="Images">
-        <ThemedText>
-          For static images, you can use the <ThemedText type="defaultSemiBold">@2x</ThemedText> and{' '}
-          <ThemedText type="defaultSemiBold">@3x</ThemedText> suffixes to provide files for
-          different screen densities
-        </ThemedText>
-        <Image
-          source={require('@/assets/images/react-logo.png')}
-          style={{ width: 100, height: 100, alignSelf: 'center' }}
-        />
-        <ExternalLink href="https://reactnative.dev/docs/images">
-          <ThemedText type="link">Learn more</ThemedText>
-        </ExternalLink>
-      </Collapsible>
-      <Collapsible title="Light and dark mode components">
-        <ThemedText>
-          This template has light and dark mode support. The{' '}
-          <ThemedText type="defaultSemiBold">useColorScheme()</ThemedText> hook lets you inspect
-          what the user&apos;s current color scheme is, and so you can adjust UI colors accordingly.
-        </ThemedText>
-        <ExternalLink href="https://docs.expo.dev/develop/user-interface/color-themes/">
-          <ThemedText type="link">Learn more</ThemedText>
-        </ExternalLink>
-      </Collapsible>
-      <Collapsible title="Animations">
-        <ThemedText>
-          This template includes an example of an animated component. The{' '}
-          <ThemedText type="defaultSemiBold">components/HelloWave.tsx</ThemedText> component uses
-          the powerful{' '}
-          <ThemedText type="defaultSemiBold" style={{ fontFamily: Fonts.mono }}>
-            react-native-reanimated
-          </ThemedText>{' '}
-          library to create a waving hand animation.
-        </ThemedText>
-        {Platform.select({
-          ios: (
-            <ThemedText>
-              The <ThemedText type="defaultSemiBold">components/ParallaxScrollView.tsx</ThemedText>{' '}
-              component provides a parallax effect for the header image.
-            </ThemedText>
-          ),
-        })}
-      </Collapsible>
-    </ParallaxScrollView>
+    <ThemedView style={[styles.screen, { paddingTop: insets.top }]}>
+      <ScrollView
+        contentContainerStyle={[styles.content, { paddingBottom: 28 + insets.bottom }]}
+        scrollEventThrottle={16}
+        onScroll={(event) => {
+          const offsetY = event.nativeEvent.contentOffset.y;
+          if (offsetY < -20 && !showSearch) {
+            setShowSearch(true);
+          } else if (offsetY >= 0 && !searchQuery && showSearch) {
+            setShowSearch(false);
+          }
+        }}>
+        <View style={styles.searchSlot}>
+          <Animated.View
+            pointerEvents={showSearch ? 'auto' : 'none'}
+            style={[
+              styles.searchInputWrap,
+              { backgroundColor: palette.surface, borderColor: palette.border },
+              { opacity: searchAnim, transform: [{ translateY: searchTranslateY }] },
+            ]}>
+            <TextInput
+              value={searchQuery}
+              onChangeText={setSearchQuery}
+              placeholder="Search notes"
+              placeholderTextColor={palette.muted}
+              style={[styles.searchInput, { color: palette.text }]}
+              autoCapitalize="none"
+              autoCorrect={false}
+              returnKeyType="search"
+            />
+          </Animated.View>
+        </View>
+
+        <View style={styles.section}>
+          <ThemedText type="subtitle" style={{ fontSize: 18 }}>
+            Recent Notes
+          </ThemedText>
+          <View style={styles.noteStack}>
+            {filteredNotes.map((note) => {
+              const tone = bucketTone(note.bucket, colorScheme);
+              return (
+                <View
+                  key={note.title}
+                  style={[
+                    styles.noteCard,
+                    { backgroundColor: palette.surface, borderColor: palette.border },
+                  ]}>
+                  <View style={styles.noteHeaderRow}>
+                    <ThemedText style={styles.noteTitle} numberOfLines={1}>
+                      {note.title}
+                    </ThemedText>
+                    <View
+                      style={[
+                        styles.bucketPill,
+                        styles.noteBucketPill,
+                        { backgroundColor: tone.bg, borderColor: tone.border },
+                      ]}>
+                      <ThemedText style={{ fontSize: 10, lineHeight: 12, color: tone.text }}>
+                        {note.bucket}
+                      </ThemedText>
+                    </View>
+                  </View>
+                  <ThemedText style={{ color: palette.muted, marginTop: 6 }}>
+                    {note.body}
+                  </ThemedText>
+                </View>
+              );
+            })}
+            {filteredNotes.length === 0 ? (
+              <View
+                style={[
+                  styles.noteCard,
+                  { backgroundColor: palette.surfaceAlt, borderColor: palette.border },
+                ]}>
+                <ThemedText style={{ color: palette.muted }}>No notes match your search.</ThemedText>
+              </View>
+            ) : null}
+          </View>
+        </View>
+      </ScrollView>
+    </ThemedView>
   );
 }
 
 const styles = StyleSheet.create({
-  headerImage: {
-    color: '#808080',
-    bottom: -90,
-    left: -35,
-    position: 'absolute',
+  screen: {
+    flex: 1,
   },
-  titleContainer: {
+  content: {
+    paddingHorizontal: 20,
+    gap: 24,
+  },
+  section: {
+    gap: 12,
+  },
+  noteStack: {
+    gap: 12,
+  },
+  noteCard: {
+    borderRadius: 18,
+    borderWidth: 1,
+    padding: 14,
+  },
+  bucketPill: {
+    alignSelf: 'flex-start',
+    borderRadius: 999,
+    borderWidth: 1,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+  },
+  noteHeaderRow: {
     flexDirection: 'row',
-    gap: 8,
+    alignItems: 'center',
+  },
+  noteTitle: {
+    flex: 1,
+    paddingRight: 10,
+    fontSize: 15,
+    lineHeight: 18,
+    alignSelf: 'center',
+  },
+  noteBucketPill: {
+    alignSelf: 'center',
+  },
+  searchSlot: {
+    height: 46,
+    justifyContent: 'center',
+  },
+  searchInputWrap: {
+    borderRadius: 18,
+    borderWidth: 1,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+  },
+  searchInput: {
+    fontSize: 15,
+    lineHeight: 18,
   },
 });
