@@ -1,7 +1,7 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { Pressable, StyleSheet, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useRouter } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
@@ -9,11 +9,15 @@ import { IconSymbol } from '@/components/ui/icon-symbol';
 import { Colors, Fonts } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 
-export default function CaptureScreen() {
+export default function NoteScreen() {
   const colorScheme = useColorScheme() ?? 'light';
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const palette = Colors[colorScheme];
+
+  const params = useLocalSearchParams<{ title?: string; body?: string; bucket?: string }>();
+  const [title, setTitle] = useState(params.title ?? '');
+  const [body, setBody] = useState(params.body ?? '');
 
   const placeholderColor = useMemo(
     () => (colorScheme === 'dark' ? '#9C9489' : '#8B837A'),
@@ -35,7 +39,7 @@ export default function CaptureScreen() {
                 opacity: pressed ? 0.7 : 1,
               },
             ]}
-            onPress={() => router.push('/explore')}
+            onPress={() => router.back()}
           >
             <IconSymbol name="chevron.left" size={20} color={palette.text} />
           </Pressable>
@@ -44,7 +48,9 @@ export default function CaptureScreen() {
               style={({ pressed }) => [
                 styles.primaryButton,
                 { backgroundColor: palette.accent, opacity: pressed ? 0.7 : 1 },
-              ]}>
+              ]}
+              accessibilityLabel="Echo this note"
+              onPress={() => router.push('/echo')}>
               <ThemedText style={{ color: palette.background, fontSize: 14 }}>Echo</ThemedText>
             </Pressable>
             <Pressable
@@ -57,22 +63,31 @@ export default function CaptureScreen() {
                 },
               ]}
               accessibilityLabel="Save note"
-              onPress={() => router.push('/echo')}>
+              onPress={() => router.back()}>
               <IconSymbol name="checkmark" size={18} color={palette.text} />
             </Pressable>
           </View>
         </View>
 
         <TextInput
-          autoFocus
+          placeholder="Title"
+          value={title}
+          onChangeText={setTitle}
+          placeholderTextColor={placeholderColor}
+          style={[styles.titleInput, { color: palette.text }]}
+        />
+        <TextInput
           multiline
-          placeholder="What do you want to remember later?"
+          placeholder="Write your note"
+          value={body}
+          onChangeText={setBody}
           placeholderTextColor={placeholderColor}
           style={[
-            styles.input,
+            styles.bodyInput,
             {
               color: palette.text,
               fontFamily: Fonts.sans,
+              backgroundColor: palette.surfaceAlt,
             },
           ]}
           textAlignVertical="top"
@@ -96,13 +111,6 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-  },
-  input: {
-    flex: 1,
-    borderRadius: 20,
-    padding: 16,
-    fontSize: 16,
-    lineHeight: 22,
   },
   actionsTop: {
     flexDirection: 'row',
@@ -129,4 +137,16 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  titleInput: {
+    fontSize: 18,
+    fontWeight: '600',
+  },
+  bodyInput: {
+    flex: 1,
+    borderRadius: 20,
+    padding: 16,
+    fontSize: 16,
+    lineHeight: 22,
+  },
 });
+

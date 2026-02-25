@@ -212,6 +212,9 @@ export default function EchoScreen() {
                 <ThemedText type="subtitle" style={{ fontSize: 18, marginBottom: 6 }}>
                   New Bucket
                 </ThemedText>
+                <ThemedText style={{ fontSize: 12, color: palette.muted, marginBottom: 12 }}>
+                  Add a name, choose a color, and describe the bucket.
+                </ThemedText>
 
                 <View style={styles.nameColorRow}>
                   <View style={{ flex: 1 }}>
