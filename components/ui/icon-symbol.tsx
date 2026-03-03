@@ -22,6 +22,8 @@ const MAPPING = {
   'square.and.pencil': 'edit',
   'checkmark': 'check',
   'checkmark.circle': 'check-circle',
+  trash: 'delete-outline',
+  'trash.fill': 'delete',
   sparkles: 'auto-awesome',
   'books.vertical': 'menu-book',
 } as IconMapping;

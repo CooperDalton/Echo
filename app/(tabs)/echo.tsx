@@ -1,37 +1,18 @@
 import { Pressable, ScrollView, StyleSheet, View, Modal, TextInput } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect, useMemo } from 'react';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
-import { BUCKET_COLORS, type BucketName } from '@/constants/buckets';
+import { useNotes } from '@/context/notes-context';
+import { BUCKET_COLORS, BUCKETS, type BucketName } from '@/constants/buckets';
 import { Colors } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 
-const todayEchoes: { text: string; bucket: BucketName; date: string }[] = [
-  {
-    text: 'Keep Echo ambient. No streaks, no nags.',
-    bucket: 'Systems',
-    date: 'Echo from March 12',
-  },
-  {
-    text: 'Surface long notes with a single sentence that preserves meaning.',
-    bucket: 'Reflections',
-    date: 'Echo from March 10',
-  },
-];
-
-const bucketSummary: { name: BucketName; count: number }[] = [
-  { name: 'Business Ideas', count: 24 },
-  { name: 'Reflections', count: 58 },
-  { name: 'Game Dev', count: 12 },
-  { name: 'Family', count: 9 },
-  { name: 'Systems', count: 31 },
-];
-
 // Removed schedule rules; no schedule configuration shown in UI
 
-const standingMessages = ['Slow down, capture clearly.', 'Keep the buckets semantic.'];
+const initialStandingMessages = ['Slow down, capture clearly.', 'Keep the buckets semantic.'];
 
 // Preset color themes available for new buckets (12 options)
 const PRESET_COLORS = {
@@ -101,10 +82,28 @@ function bucketTone(bucket: BucketName, colorScheme: 'light' | 'dark') {
     : { bg: color.lightBg, border: color.lightBorder, text: color.lightText };
 }
 
+function formatEchoDate(createdAt: string): string {
+  const date = new Date(createdAt);
+  if (Number.isNaN(date.getTime())) return 'Echo';
+
+  return `Echo from ${date.toLocaleDateString(undefined, {
+    month: 'long',
+    day: 'numeric',
+  })}`;
+}
+
 export default function EchoScreen() {
   const colorScheme = useColorScheme() ?? 'light';
   const insets = useSafeAreaInsets();
   const palette = Colors[colorScheme];
+  const router = useRouter();
+  const { recent, reviewed } = useNotes();
+  const { standingAction, standingId, standingText, standingNonce } = useLocalSearchParams<{
+    standingAction?: string;
+    standingId?: string;
+    standingText?: string;
+    standingNonce?: string;
+  }>();
 
   // Modal + new bucket state
   const [bucketModalOpen, setBucketModalOpen] = useState(false);
@@ -117,6 +116,7 @@ export default function EchoScreen() {
   const [colorMenuOpen, setColorMenuOpen] = useState(false);
   const [widgetPreviewEnabled, setWidgetPreviewEnabled] = useState(true);
   const [standingMessagesEnabled, setStandingMessagesEnabled] = useState(true);
+  const [standingMessages, setStandingMessages] = useState(initialStandingMessages);
   // Inspect/edit modal state
   const [inspectOpen, setInspectOpen] = useState(false);
   const [activeBucket, setActiveBucket] = useState<
@@ -145,6 +145,55 @@ export default function EchoScreen() {
     setInspectColorKey(b.colorKey);
     setInspectOpen(true);
   }, [customBuckets]);
+
+  useEffect(() => {
+    if (standingAction !== 'upsert' && standingAction !== 'delete') return;
+
+    const parsedId = typeof standingId === 'string' ? Number.parseInt(standingId, 10) : NaN;
+    const hasValidId = Number.isInteger(parsedId) && parsedId >= 0;
+
+    if (standingAction === 'delete') {
+      if (hasValidId) {
+        setStandingMessages((prev) => prev.filter((_, index) => index !== parsedId));
+      }
+      router.replace('/echo');
+      return;
+    }
+
+    if (typeof standingText === 'string') {
+      const trimmed = standingText.trim();
+      if (trimmed.length > 0) {
+        setStandingMessages((prev) => {
+          if (hasValidId && parsedId < prev.length) {
+            return prev.map((message, index) => (index === parsedId ? trimmed : message));
+          }
+          return [...prev, trimmed];
+        });
+      }
+    }
+
+    router.replace('/echo');
+  }, [standingAction, standingId, standingText, standingNonce, router]);
+
+  const bucketSummary = useMemo(() => {
+    const allNotes = [...recent, ...reviewed];
+    return BUCKETS.map((name) => ({
+      name,
+      count: allNotes.filter((note) => note.bucket === name).length,
+    }));
+  }, [recent, reviewed]);
+
+  const todayEchoes = useMemo(() => {
+    const allNotes = [...recent, ...reviewed];
+    return allNotes
+      .filter((note) => note.bucket !== null)
+      .slice(0, 3)
+      .map((note) => ({
+        text: note.body,
+        bucket: note.bucket as BucketName,
+        date: formatEchoDate(note.createdAt),
+      }));
+  }, [recent, reviewed]);
 
   return (
     <ThemedView style={[styles.screen, { paddingTop: insets.top }]}> 
@@ -208,7 +257,7 @@ export default function EchoScreen() {
           {/* New bucket modal */}
           <Modal visible={bucketModalOpen} transparent animationType="fade">
             <View style={styles.modalOverlay}>
-              <View style={[styles.modalCard, { backgroundColor: palette.surface, borderColor: palette.border }]}>
+              <Pressable style={[styles.modalCard, { backgroundColor: palette.surface, borderColor: palette.border }]} onPress={() => { if (colorMenuOpen) setColorMenuOpen(false); }}>
                 <ThemedText type="subtitle" style={{ fontSize: 18, marginBottom: 6 }}>
                   New Bucket
                 </ThemedText>
@@ -234,18 +283,24 @@ export default function EchoScreen() {
                           opacity: pressed ? 0.7 : 1,
                         },
                       ]}
-                      onPress={() => setColorMenuOpen((o) => !o)}
+                      onPress={(e) => { e.stopPropagation(); setColorMenuOpen((o) => !o); }}
                     >
                       <View
                         style={[
+                          // Match option chip style but keep original trigger size
                           styles.colorChip,
                           { width: 20, height: 20, borderWidth: 2 },
-                          selectedColorKey ? { backgroundColor: presetTone(selectedColorKey, colorScheme).bg, borderColor: presetTone(selectedColorKey, colorScheme).text } : { backgroundColor: palette.surfaceAlt, borderColor: palette.border },
+                          selectedColorKey
+                            ? {
+                                backgroundColor: presetTone(selectedColorKey, colorScheme).bg,
+                                borderColor: presetTone(selectedColorKey, colorScheme).border,
+                              }
+                            : { backgroundColor: palette.surfaceAlt, borderColor: palette.border },
                         ]}
                       />
                     </Pressable>
                     {colorMenuOpen ? (
-                      <View style={[styles.colorDropdownMenu, { backgroundColor: palette.surface, borderColor: palette.border }]}>
+                      <Pressable onPress={(e) => e.stopPropagation()} style={[styles.colorDropdownMenu, { backgroundColor: palette.surface, borderColor: palette.border }]}>
                         {Object.keys(PRESET_COLORS).map((key) => {
                           const k = key as PresetKey;
                           const disabled = customBuckets.some((b) => b.colorKey === k);
@@ -254,7 +309,8 @@ export default function EchoScreen() {
                             <Pressable
                               key={`opt-${k}`}
                               disabled={disabled}
-                              onPress={() => {
+                              onPress={(e) => {
+                                e.stopPropagation();
                                 setSelectedColorKey(k);
                                 setColorMenuOpen(false);
                               }}
@@ -269,7 +325,7 @@ export default function EchoScreen() {
                             />
                           );
                         })}
-                      </View>
+                      </Pressable>
                     ) : null}
                   </View>
                 </View>
@@ -315,7 +371,7 @@ export default function EchoScreen() {
                     <ThemedText style={{ color: palette.text }}>Save</ThemedText>
                   </Pressable>
                 </View>
-              </View>
+              </Pressable>
             </View>
           </Modal>
         </View>
@@ -324,7 +380,7 @@ export default function EchoScreen() {
         <Modal visible={inspectOpen} transparent animationType="fade">
           <View style={styles.modalOverlay}>
             {activeBucket ? (
-              <View style={[styles.modalCard, { backgroundColor: palette.surface, borderColor: palette.border }]}> 
+              <Pressable style={[styles.modalCard, { backgroundColor: palette.surface, borderColor: palette.border }]} onPress={() => { if (inspectColorMenuOpen) setInspectColorMenuOpen(false); }}> 
                 {(() => {
                   const tone = activeBucket.type === 'builtin'
                     ? bucketTone(activeBucket.name, colorScheme)
@@ -358,20 +414,24 @@ export default function EchoScreen() {
                                 opacity: pressed ? 0.7 : 1,
                               },
                             ]}
-                            onPress={() => isCustom && setInspectColorMenuOpen((o) => !o)}
+                            onPress={(e) => { if (!isCustom) return; e.stopPropagation(); setInspectColorMenuOpen((o) => !o); }}
                           >
                             <View
                               style={[
+                                // Match option chip style but keep original trigger size
                                 styles.colorChip,
                                 { width: 20, height: 20, borderWidth: 2 },
                                 isCustom && inspectColorKey
-                                  ? { backgroundColor: presetTone(inspectColorKey, colorScheme).bg, borderColor: presetTone(inspectColorKey, colorScheme).text }
+                                  ? {
+                                      backgroundColor: presetTone(inspectColorKey, colorScheme).bg,
+                                      borderColor: presetTone(inspectColorKey, colorScheme).border,
+                                    }
                                   : { backgroundColor: palette.surfaceAlt, borderColor: palette.border },
                               ]}
                             />
                           </Pressable>
                           {isCustom && inspectColorMenuOpen ? (
-                            <View style={[styles.colorDropdownMenu, { backgroundColor: palette.surface, borderColor: palette.border }]}>
+                            <Pressable onPress={(e) => e.stopPropagation()} style={[styles.colorDropdownMenu, { backgroundColor: palette.surface, borderColor: palette.border }]}>
                               {Object.keys(PRESET_COLORS).map((key) => {
                                 const k = key as PresetKey;
                                 const disabled = customBuckets.some((b, i) => i !== (activeBucket.type === 'custom' ? activeBucket.index : -1) && b.colorKey === k);
@@ -380,7 +440,8 @@ export default function EchoScreen() {
                                   <Pressable
                                     key={`opt-${k}`}
                                     disabled={disabled}
-                                    onPress={() => {
+                                    onPress={(e) => {
+                                      e.stopPropagation();
                                       setInspectColorKey(k);
                                       setInspectColorMenuOpen(false);
                                     }}
@@ -391,7 +452,7 @@ export default function EchoScreen() {
                                   />
                                 );
                               })}
-                            </View>
+                            </Pressable>
                           ) : null}
                         </View>
                       </View>
@@ -431,7 +492,7 @@ export default function EchoScreen() {
                     </>
                   );
                 })()}
-              </View>
+              </Pressable>
             ) : null}
           </View>
         </Modal>
@@ -443,9 +504,17 @@ export default function EchoScreen() {
             {todayEchoes.map((echo, index) => {
               const tone = bucketTone(echo.bucket, colorScheme);
               return (
-                <View
+                <Pressable
                   key={`${echo.text}-${index}`}
-                  style={[styles.echoCard, { backgroundColor: palette.surface, borderColor: palette.border }]}
+                  onPress={() => router.push({ pathname: '/', params: { text: echo.text, returnTo: '/echo' } })}
+                  style={({ pressed }) => [
+                    styles.echoCard,
+                    {
+                      backgroundColor: palette.surface,
+                      borderColor: palette.border,
+                      opacity: pressed ? 0.7 : 1,
+                    },
+                  ]}
                 >
                   <View style={styles.noteHeaderRow}>
                     <ThemedText style={styles.noteTitle} numberOfLines={1}>
@@ -460,7 +529,7 @@ export default function EchoScreen() {
                   <ThemedText style={{ color: palette.muted, marginTop: 8, fontSize: 12 }}>
                     {echo.date}
                   </ThemedText>
-                </View>
+                </Pressable>
               );
             })}
             <View style={[styles.echoCard, styles.emptyEcho, { borderColor: palette.border, backgroundColor: palette.surfaceAlt }]}>
@@ -498,15 +567,17 @@ export default function EchoScreen() {
             </Pressable>
           </View>
           <View style={[styles.widgetCard, { backgroundColor: palette.surface, borderColor: palette.border }]}>
-            {todayEchoes.map((echo, index) => {
-              return (
-                <View key={`${echo.text}-preview`} style={styles.previewRow}>
-                  <ThemedText style={{ fontSize: 13, color: palette.text, flex: 1 }}>
-                    {index + 1}. {echo.text}
-                  </ThemedText>
-                </View>
-              );
-            })}
+            {todayEchoes.map((echo, index) => (
+              <Pressable
+                key={`${echo.text}-preview`}
+                onPress={() => router.push({ pathname: '/', params: { text: echo.text, returnTo: '/echo' } })}
+                style={({ pressed }) => [styles.previewRow, { opacity: pressed ? 0.7 : 1 }]}
+              >
+                <ThemedText style={{ fontSize: 13, color: palette.text, flex: 1 }}>
+                  {index + 1}. {echo.text}
+                </ThemedText>
+              </Pressable>
+            ))}
             <ThemedText style={{ fontSize: 13, color: palette.muted }}>
               {todayEchoes.length === 0 ? 'Calm state' : 'Tap to open the full note'}
             </ThemedText>
@@ -540,14 +611,52 @@ export default function EchoScreen() {
             </Pressable>
           </View>
           <View style={styles.standingRow}>
-            {standingMessages.map((message) => (
-              <View key={message} style={[styles.standingCard, { backgroundColor: palette.surface, borderColor: palette.border }]}>
+            {standingMessages.map((message, index) => (
+              <Pressable
+                key={`standing-${index}-${message}`}
+                onPress={() =>
+                  router.push({
+                    pathname: '/',
+                    params: {
+                      text: message,
+                      noEcho: '1',
+                      standingMode: '1',
+                      standingId: String(index),
+                      returnTo: '/echo',
+                    },
+                  })
+                }
+                style={({ pressed }) => [
+                  styles.standingCard,
+                  {
+                    backgroundColor: palette.surface,
+                    borderColor: palette.border,
+                    opacity: pressed ? 0.7 : 1,
+                  },
+                ]}
+              >
                 <ThemedText style={{ fontSize: 14 }}>{message}</ThemedText>
-              </View>
+              </Pressable>
             ))}
-            <View style={[styles.standingCard, styles.addStanding, { backgroundColor: palette.surfaceAlt, borderColor: palette.border }]}>
+            <Pressable
+              onPress={() =>
+                router.push({
+                  pathname: '/',
+                  params: { text: '', noEcho: '1', standingMode: '1', returnTo: '/echo' },
+                })
+              }
+              style={({ pressed }) => [
+                styles.standingCard,
+                styles.addStanding,
+                {
+                  backgroundColor: palette.surfaceAlt,
+                  borderColor: palette.border,
+                  opacity: pressed ? 0.7 : 1,
+                },
+              ]}
+            >
               <ThemedText style={{ fontSize: 14, color: palette.muted }}>+ Add message</ThemedText>
-            </View>
+            </Pressable>
           </View>
         </View>
       </ScrollView>
@@ -757,7 +866,8 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderRadius: 12,
     padding: 10,
-    width: 190,
+    // Force an exact 4x3 grid: 4 chips (28px) + 3 gaps (8px) + padding (10px x2) + borders (1px x2) = 158
+    width: 158,
     zIndex: 100,
     elevation: 6,
     shadowColor: '#000',
