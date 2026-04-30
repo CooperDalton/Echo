@@ -58,7 +58,7 @@ export default function CaptureScreen() {
   const parsedStandingId = typeof standingId === 'string' ? Number.parseInt(standingId, 10) : NaN;
   const hasStandingId = Number.isInteger(parsedStandingId) && parsedStandingId >= 0;
   const returnPath =
-    typeof returnTo === 'string' && returnTo.startsWith('/')
+    returnTo === '/echo' || returnTo === '/explore'
       ? returnTo
       : '/explore';
 
@@ -89,7 +89,11 @@ export default function CaptureScreen() {
     if (hasStandingId) {
       params.standingId = `${parsedStandingId}`;
     }
-    router.replace({ pathname: returnPath, params });
+    if (returnPath === '/echo') {
+      router.replace({ pathname: '/echo', params });
+      return;
+    }
+    router.replace(returnPath);
   }, [goBack, hasStandingId, parsedStandingId, returnPath, router, text]);
 
   const deleteStandingMessage = useCallback(() => {
@@ -98,14 +102,18 @@ export default function CaptureScreen() {
       return;
     }
 
-    router.replace({
-      pathname: returnPath,
-      params: {
-        standingAction: 'delete',
-        standingId: `${parsedStandingId}`,
-        standingNonce: `${Date.now()}`,
-      },
-    });
+    if (returnPath === '/echo') {
+      router.replace({
+        pathname: '/echo',
+        params: {
+          standingAction: 'delete',
+          standingId: `${parsedStandingId}`,
+          standingNonce: `${Date.now()}`,
+        },
+      });
+      return;
+    }
+    router.replace(returnPath);
   }, [goBack, hasStandingId, parsedStandingId, returnPath, router]);
 
   const submitNote = useCallback(() => {
@@ -125,7 +133,7 @@ export default function CaptureScreen() {
 
   // Ensure tapping the Capture tab always starts a fresh note (no params)
   useEffect(() => {
-    const unsub = navigation.addListener('tabPress', () => {
+    const unsub = (navigation as { addListener: (event: 'tabPress', callback: () => void) => () => void }).addListener('tabPress', () => {
       setText('');
       router.replace('/');
     });

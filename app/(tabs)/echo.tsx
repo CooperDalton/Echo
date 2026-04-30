@@ -92,6 +92,12 @@ function formatEchoDate(createdAt: string): string {
   })}`;
 }
 
+function isEchoDue(nextDueAt: string): boolean {
+  const dueDate = new Date(nextDueAt);
+  if (Number.isNaN(dueDate.getTime())) return true;
+  return dueDate.getTime() <= Date.now();
+}
+
 export default function EchoScreen() {
   const colorScheme = useColorScheme() ?? 'light';
   const insets = useSafeAreaInsets();
@@ -186,12 +192,15 @@ export default function EchoScreen() {
   const todayEchoes = useMemo(() => {
     const allNotes = [...recent, ...reviewed];
     return allNotes
-      .filter((note) => note.bucket !== null)
+      .filter((note) => note.bucket !== null && note.echo.enabled && isEchoDue(note.echo.nextDueAt))
+      .sort((a, b) => a.echo.nextDueAt.localeCompare(b.echo.nextDueAt))
       .slice(0, 3)
       .map((note) => ({
         text: note.body,
         bucket: note.bucket as BucketName,
-        date: formatEchoDate(note.createdAt),
+        date: note.echo.lastReviewedAt
+          ? `Last reviewed ${formatEchoDate(note.echo.lastReviewedAt).replace('Echo from ', '')}`
+          : formatEchoDate(note.createdAt),
       }));
   }, [recent, reviewed]);
 

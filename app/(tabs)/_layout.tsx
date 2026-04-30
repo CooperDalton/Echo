@@ -39,6 +39,15 @@ export default function TabLayout() {
           tabBarIcon: ({ color }) => <IconSymbol size={26} name="sparkles" color={color} />,
         }}
       />
+      <Tabs.Screen
+        name="checkin"
+        options={{
+          title: 'Check-in',
+          tabBarIcon: ({ color }) => (
+            <IconSymbol size={26} name="heart.text.square" color={color} />
+          ),
+        }}
+      />
     </Tabs>
   );
 }

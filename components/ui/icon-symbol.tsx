@@ -26,6 +26,7 @@ const MAPPING = {
   'trash.fill': 'delete',
   sparkles: 'auto-awesome',
   'books.vertical': 'menu-book',
+  'heart.text.square': 'fact-check',
 } as IconMapping;
 
 /**
