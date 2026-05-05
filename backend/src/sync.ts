@@ -1,7 +1,14 @@
-import type { RestEndpointMethodTypes } from '@octokit/rest';
-
 import type { CheckIn, Note, NotesState } from './contracts';
-import { createGitHubClient } from './github';
+import {
+  createCommit,
+  createTree,
+  getBlob,
+  getCommit,
+  getRef,
+  getTree,
+  type GitHubTreeEntry,
+  updateRef,
+} from './github';
 import {
   notePath,
   checkInPath,
@@ -38,8 +45,6 @@ type SyncOutput = {
   state: NotesState;
   summary: SyncSummary;
 };
-
-type GitTree = RestEndpointMethodTypes['git']['getTree']['response']['data']['tree'];
 
 function compareIsoDates(left: string, right: string): number {
   const leftTime = Date.parse(left);
@@ -110,48 +115,26 @@ function isVaultMarkdownPath(path: string | undefined): path is string {
 
 async function fetchMarkdownFiles(
   repo: RepoRef,
-  tree: GitTree
+  tree: GitHubTreeEntry[]
 ): Promise<Map<string, string>> {
-  const octokit = await createGitHubClient();
   const fileMap = new Map<string, string>();
 
   for (const entry of tree) {
     if (entry.type !== 'blob' || !entry.sha || !isVaultMarkdownPath(entry.path)) continue;
 
-    const blob = await octokit.git.getBlob({
-      owner: repo.owner,
-      repo: repo.repo,
-      file_sha: entry.sha,
-    });
-
-    fileMap.set(entry.path, decodeBase64(blob.data.content));
+    const blob = await getBlob(repo.owner, repo.repo, entry.sha);
+    fileMap.set(entry.path, decodeBase64(blob.content));
   }
 
   return fileMap;
 }
 
 export async function loadRepoSnapshot(repo: RepoRef): Promise<RepoSnapshot> {
-  const octokit = await createGitHubClient();
-  const ref = await octokit.git.getRef({
-    owner: repo.owner,
-    repo: repo.repo,
-    ref: `heads/${repo.branch}`,
-  });
+  const ref = await getRef(repo.owner, repo.repo, repo.branch);
+  const commit = await getCommit(repo.owner, repo.repo, ref.object.sha);
+  const treeResponse = await getTree(repo.owner, repo.repo, commit.tree.sha);
 
-  const commit = await octokit.git.getCommit({
-    owner: repo.owner,
-    repo: repo.repo,
-    commit_sha: ref.data.object.sha,
-  });
-
-  const treeResponse = await octokit.git.getTree({
-    owner: repo.owner,
-    repo: repo.repo,
-    tree_sha: commit.data.tree.sha,
-    recursive: 'true',
-  });
-
-  const existingFiles = await fetchMarkdownFiles(repo, treeResponse.data.tree);
+  const existingFiles = await fetchMarkdownFiles(repo, treeResponse.tree);
   const notes: Note[] = [];
   const checkIns: CheckIn[] = [];
 
@@ -171,8 +154,8 @@ export async function loadRepoSnapshot(repo: RepoRef): Promise<RepoSnapshot> {
   return {
     notes: sortNewestFirst(notes),
     checkIns: sortNewestFirst(checkIns),
-    baseTreeSha: commit.data.tree.sha,
-    headCommitSha: commit.data.sha,
+    baseTreeSha: commit.tree.sha,
+    headCommitSha: commit.sha,
     existingFiles,
   };
 }
@@ -183,7 +166,6 @@ async function commitFiles(
   desiredFiles: Map<string, string>,
   deviceId: string
 ): Promise<number> {
-  const octokit = await createGitHubClient();
   const changedEntries = [...desiredFiles.entries()]
     .filter(([path, content]) => snapshot.existingFiles.get(path) !== content)
     .map(([path, content]) => ({
@@ -197,27 +179,15 @@ async function commitFiles(
     return 0;
   }
 
-  const newTree = await octokit.git.createTree({
-    owner: repo.owner,
-    repo: repo.repo,
-    base_tree: snapshot.baseTreeSha,
-    tree: changedEntries,
-  });
-
-  const commit = await octokit.git.createCommit({
-    owner: repo.owner,
-    repo: repo.repo,
-    message: `Sync Echo vault from ${deviceId}`,
-    tree: newTree.data.sha,
-    parents: [snapshot.headCommitSha],
-  });
-
-  await octokit.git.updateRef({
-    owner: repo.owner,
-    repo: repo.repo,
-    ref: `heads/${repo.branch}`,
-    sha: commit.data.sha,
-  });
+  const newTree = await createTree(repo.owner, repo.repo, snapshot.baseTreeSha, changedEntries);
+  const commit = await createCommit(
+    repo.owner,
+    repo.repo,
+    `Sync Echo vault from ${deviceId}`,
+    newTree.sha,
+    snapshot.headCommitSha
+  );
+  await updateRef(repo.owner, repo.repo, repo.branch, commit.sha);
 
   return changedEntries.length;
 }
