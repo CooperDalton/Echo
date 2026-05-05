@@ -1,7 +1,6 @@
-import { Octokit } from '@octokit/rest';
-
 import { env } from './config';
 
-export function createGitHubClient(): Octokit {
+export async function createGitHubClient() {
+  const { Octokit } = await import('@octokit/rest');
   return new Octokit({ auth: env.GITHUB_TOKEN });
 }

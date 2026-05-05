@@ -2,6 +2,9 @@
   "name": "echo-backend",
   "version": "1.0.0",
   "private": true,
+  "engines": {
+    "node": "22.x"
+  },
   "scripts": {
     "dev": "vercel dev --listen 8787",
     "compile": "tsc -p tsconfig.json",

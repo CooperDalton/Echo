@@ -112,7 +112,7 @@ async function fetchMarkdownFiles(
   repo: RepoRef,
   tree: GitTree
 ): Promise<Map<string, string>> {
-  const octokit = createGitHubClient();
+  const octokit = await createGitHubClient();
   const fileMap = new Map<string, string>();
 
   for (const entry of tree) {
@@ -131,7 +131,7 @@ async function fetchMarkdownFiles(
 }
 
 export async function loadRepoSnapshot(repo: RepoRef): Promise<RepoSnapshot> {
-  const octokit = createGitHubClient();
+  const octokit = await createGitHubClient();
   const ref = await octokit.git.getRef({
     owner: repo.owner,
     repo: repo.repo,
@@ -183,7 +183,7 @@ async function commitFiles(
   desiredFiles: Map<string, string>,
   deviceId: string
 ): Promise<number> {
-  const octokit = createGitHubClient();
+  const octokit = await createGitHubClient();
   const changedEntries = [...desiredFiles.entries()]
     .filter(([path, content]) => snapshot.existingFiles.get(path) !== content)
     .map(([path, content]) => ({
