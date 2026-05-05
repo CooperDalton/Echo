@@ -1,31 +1,24 @@
-const DEFAULT_ALLOWED_HEADERS = 'Content-Type, Authorization, X-GitHub-Event, X-GitHub-Delivery, X-Hub-Signature-256';
+import type { VercelResponse } from '@vercel/node';
 
-export function withCors(response: Response): Response {
-  const headers = new Headers(response.headers);
-  headers.set('Access-Control-Allow-Origin', '*');
-  headers.set('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-  headers.set('Access-Control-Allow-Headers', DEFAULT_ALLOWED_HEADERS);
-  return new Response(response.body, {
-    status: response.status,
-    statusText: response.statusText,
-    headers,
-  });
+const DEFAULT_ALLOWED_HEADERS =
+  'Content-Type, Authorization, X-GitHub-Event, X-GitHub-Delivery, X-Hub-Signature-256';
+
+export function applyCors(res: VercelResponse): void {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', DEFAULT_ALLOWED_HEADERS);
 }
 
-export function optionsResponse(): Response {
-  return withCors(new Response(null, { status: 204 }));
+export function handleOptions(res: VercelResponse): void {
+  applyCors(res);
+  res.status(204).end();
 }
 
-export function jsonResponse(body: unknown, init?: ResponseInit): Response {
-  return withCors(
-    Response.json(body, {
-      status: init?.status,
-      statusText: init?.statusText,
-      headers: init?.headers,
-    })
-  );
+export function sendJson(res: VercelResponse, status: number, body: unknown): void {
+  applyCors(res);
+  res.status(status).json(body);
 }
 
-export function errorResponse(status: number, error: string): Response {
-  return jsonResponse({ error }, { status });
+export function sendError(res: VercelResponse, status: number, error: string): void {
+  sendJson(res, status, { error });
 }

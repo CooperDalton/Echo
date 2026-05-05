@@ -1,25 +1,34 @@
+import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { z } from 'zod';
 
 import { classifyNote } from '../../src/openai';
 import { classifyRequestSchema } from '../_lib/schemas';
-import { errorResponse, jsonResponse, optionsResponse } from '../_lib/http';
+import { handleOptions, sendError, sendJson } from '../_lib/http';
 
 function errorMessage(error: unknown): string {
   if (error instanceof Error) return error.message;
   return 'Unexpected server error.';
 }
 
-export function OPTIONS(): Response {
-  return optionsResponse();
-}
+export default async function handler(
+  req: VercelRequest,
+  res: VercelResponse
+): Promise<void> {
+  if (req.method === 'OPTIONS') {
+    handleOptions(res);
+    return;
+  }
 
-export async function POST(request: Request): Promise<Response> {
+  if (req.method !== 'POST') {
+    sendError(res, 405, 'Method not allowed.');
+    return;
+  }
+
   try {
-    const body = await request.json();
-    const parsed = classifyRequestSchema.parse(body);
+    const parsed = classifyRequestSchema.parse(req.body);
     const result = await classifyNote(parsed.note);
 
-    return jsonResponse({
+    sendJson(res, 200, {
       bucket: result.bucket,
       confidence: result.confidence,
       method: 'ai',
@@ -27,6 +36,6 @@ export async function POST(request: Request): Promise<Response> {
     });
   } catch (error) {
     const status = error instanceof z.ZodError ? 400 : 500;
-    return errorResponse(status, errorMessage(error));
+    sendError(res, status, errorMessage(error));
   }
 }

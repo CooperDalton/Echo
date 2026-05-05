@@ -1,7 +1,8 @@
+import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { z } from 'zod';
 
 import { syncRepoSnapshot } from '../../src/sync';
-import { errorResponse, jsonResponse, optionsResponse } from '../_lib/http';
+import { handleOptions, sendError, sendJson } from '../_lib/http';
 import { syncRequestSchema } from '../_lib/schemas';
 
 function errorMessage(error: unknown): string {
@@ -9,14 +10,22 @@ function errorMessage(error: unknown): string {
   return 'Unexpected server error.';
 }
 
-export function OPTIONS(): Response {
-  return optionsResponse();
-}
+export default async function handler(
+  req: VercelRequest,
+  res: VercelResponse
+): Promise<void> {
+  if (req.method === 'OPTIONS') {
+    handleOptions(res);
+    return;
+  }
 
-export async function POST(request: Request): Promise<Response> {
+  if (req.method !== 'POST') {
+    sendError(res, 405, 'Method not allowed.');
+    return;
+  }
+
   try {
-    const body = await request.json();
-    const parsed = syncRequestSchema.parse(body);
+    const parsed = syncRequestSchema.parse(req.body);
     const merged = await syncRepoSnapshot(
       {
         owner: parsed.repo.owner,
@@ -31,7 +40,7 @@ export async function POST(request: Request): Promise<Response> {
       parsed.deviceId
     );
 
-    return jsonResponse({
+    sendJson(res, 200, {
       notes: [...merged.state.recent, ...merged.state.reviewed],
       checkIns: merged.state.checkIns,
       syncedAt: new Date().toISOString(),
@@ -39,6 +48,6 @@ export async function POST(request: Request): Promise<Response> {
     });
   } catch (error) {
     const status = error instanceof z.ZodError ? 400 : 500;
-    return errorResponse(status, errorMessage(error));
+    sendError(res, status, errorMessage(error));
   }
 }
