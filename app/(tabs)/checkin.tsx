@@ -13,7 +13,7 @@ import { CHECK_IN_EMOTIONS, type CheckInEmotion } from '@/lib/notes/types';
 
 const EMOTION_LABELS: Record<CheckInEmotion, string> = {
   happy: 'Happy',
-  content: 'Content',
+  content: 'Contnt',
   excited: 'Excited',
   bliss: 'Bliss',
   anxious: 'Anxious',
