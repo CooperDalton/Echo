@@ -10,7 +10,7 @@
     "web": "expo start --web",
     "lint": "expo lint",
     "backend:dev": "npm run dev --prefix backend",
-    "backend:build": "npm run build --prefix backend",
+    "backend:build": "npm run compile --prefix backend",
     "backend:start": "npm run start --prefix backend",
     "backend:typecheck": "npm run typecheck --prefix backend"
   },

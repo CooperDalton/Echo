@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "vercel dev --listen 8787",
-    "build": "tsc -p tsconfig.json",
+    "compile": "tsc -p tsconfig.json",
     "start": "vercel dev --listen 8787",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "vercel:build": "vercel build"
