@@ -1,0 +1,43 @@
+import type { BucketName } from '@/constants/buckets';
+import type { CheckIn, Note, NotesState } from '@/lib/notes/types';
+
+export type EchoSyncConfig = {
+  apiBaseUrl: string | null;
+  repoOwner: string | null;
+  repoName: string | null;
+  repoBranch: string;
+  deviceId: string;
+  syncEnabled: boolean;
+  aiCategorizationEnabled: boolean;
+};
+
+export type RemoteNoteClassification = {
+  bucket: BucketName;
+  confidence: number | null;
+  method: 'ai';
+  model: string | null;
+};
+
+export type SyncStatus = {
+  isSyncing: boolean;
+  configured: boolean;
+  lastSyncedAt: string | null;
+  lastError: string | null;
+  pendingReason: string | null;
+};
+
+export type SyncSnapshot = {
+  notes: Note[];
+  checkIns: CheckIn[];
+};
+
+export type SyncResult = {
+  state: NotesState;
+  syncedAt: string;
+  summary: {
+    pushedNotes: number;
+    pushedCheckIns: number;
+    pulledNotes: number;
+    pulledCheckIns: number;
+  };
+};

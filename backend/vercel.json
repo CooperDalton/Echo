@@ -1,0 +1,16 @@
+{
+  "functions": {
+    "api/health.ts": {
+      "maxDuration": 30
+    },
+    "api/mobile/classify-note.ts": {
+      "maxDuration": 60
+    },
+    "api/mobile/sync.ts": {
+      "maxDuration": 300
+    },
+    "api/github/webhook.ts": {
+      "maxDuration": 60
+    }
+  }
+}

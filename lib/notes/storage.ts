@@ -9,6 +9,7 @@ import {
   type CheckInKind,
   type EchoSchedule,
   type Note,
+  type NoteClassificationMethod,
   type NoteClassificationStatus,
   type NotesState,
 } from '@/lib/notes/types';
@@ -32,6 +33,10 @@ function isBucketName(value: unknown): value is BucketName {
 
 function isClassificationStatus(value: unknown): value is NoteClassificationStatus {
   return value === 'pending' || value === 'classified' || value === 'failed';
+}
+
+function isClassificationMethod(value: unknown): value is NoteClassificationMethod {
+  return value === 'ai' || value === 'keyword' || value === 'unknown';
 }
 
 function isCheckInKind(value: unknown): value is CheckInKind {
@@ -175,7 +180,6 @@ function relativeVaultPath(path: string): string {
 }
 
 function serializeNote(note: Note): string {
-  const classificationMethod = note.classificationStatus === 'classified' ? 'ai' : 'local';
   return [
     '---',
     'schema: echo-note-v1',
@@ -188,7 +192,7 @@ function serializeNote(note: Note): string {
     'source: mobile',
     'classification:',
     `  status: ${note.classificationStatus}`,
-    `  method: ${classificationMethod}`,
+    `  method: ${note.classificationMethod}`,
     `  confidence: ${formatYamlValue(note.classificationConfidence)}`,
     'echo:',
     `  enabled: ${note.echo.enabled}`,
@@ -245,6 +249,11 @@ function parseNoteFile(markdown: string, filePath: string): Note | null {
     : bucket
       ? 'classified'
       : 'pending';
+  const classificationMethod = isClassificationMethod(classification.method)
+    ? classification.method
+    : classificationStatus === 'classified'
+      ? 'unknown'
+      : 'unknown';
 
   return {
     id: frontmatter.id,
@@ -255,6 +264,7 @@ function parseNoteFile(markdown: string, filePath: string): Note | null {
       typeof frontmatter.updated_at === 'string' ? frontmatter.updated_at : frontmatter.created_at,
     bucket,
     classificationStatus,
+    classificationMethod,
     classificationConfidence:
       typeof classification.confidence === 'number' ? classification.confidence : null,
     echo: {
@@ -356,7 +366,7 @@ async function writeSystemFiles(): Promise<void> {
     [
       '# Echo Schema',
       '',
-      'Echo notes use `schema: echo-note-v1` and exactly one `bucket` string.',
+      'Echo notes use `schema: echo-note-v1`, exactly one `bucket` string, and `classification.method` such as `ai` or `keyword`.',
       'Check-ins use `schema: echo-checkin-v1`, `energy` from 1-5, fixed emotion booleans, and the Markdown body for the daily recap.',
       '',
     ].join('\n')
@@ -397,6 +407,7 @@ async function loadLegacyState(): Promise<NotesState> {
         updatedAt: note.updatedAt ?? note.createdAt,
         bucket: note.bucket,
         classificationStatus: note.classificationStatus,
+        classificationMethod: note.classificationMethod ?? 'unknown',
         classificationConfidence: null,
         echo: note.echo ?? defaultEcho(note.createdAt),
         filePath: null,

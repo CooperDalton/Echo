@@ -8,7 +8,11 @@
     "android": "expo start --android",
     "ios": "expo start --ios",
     "web": "expo start --web",
-    "lint": "expo lint"
+    "lint": "expo lint",
+    "backend:dev": "npm run dev --prefix backend",
+    "backend:build": "npm run build --prefix backend",
+    "backend:start": "npm run start --prefix backend",
+    "backend:typecheck": "npm run typecheck --prefix backend"
   },
   "dependencies": {
     "@ai-sdk/openai": "^1.3.24",

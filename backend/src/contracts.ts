@@ -1,4 +1,12 @@
-import type { BucketName } from '@/constants/buckets';
+export const BUCKETS = [
+  'Business Ideas',
+  'Reflections',
+  'Game Dev',
+  'Family',
+  'Systems',
+] as const;
+
+export type BucketName = (typeof BUCKETS)[number];
 
 export type NoteClassificationStatus = 'pending' | 'classified' | 'failed';
 export type NoteClassificationMethod = 'ai' | 'keyword' | 'unknown';
@@ -38,7 +46,6 @@ export const CHECK_IN_EMOTIONS = [
 ] as const;
 
 export type CheckInEmotion = (typeof CHECK_IN_EMOTIONS)[number];
-
 export type CheckInKind = 'evening' | 'random';
 
 export type CheckIn = {
@@ -56,10 +63,4 @@ export type NotesState = {
   recent: Note[];
   reviewed: Note[];
   checkIns: CheckIn[];
-};
-
-export const EMPTY_NOTES_STATE: NotesState = {
-  recent: [],
-  reviewed: [],
-  checkIns: [],
 };

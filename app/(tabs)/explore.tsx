@@ -63,9 +63,12 @@ export default function LibraryScreen() {
     hydrated,
     recent,
     reviewed,
+    syncConfig,
+    syncStatus,
     markRecentAsReviewed,
     deleteRecentNote,
     deleteReviewedNote,
+    syncNow,
   } = useNotes();
 
   const [searchQuery, setSearchQuery] = useState('');
@@ -81,6 +84,7 @@ export default function LibraryScreen() {
     if (selectedBucket === 'Unbucketed') return neutralTone;
     return bucketTone(selectedBucket, colorScheme);
   }, [selectedBucket, colorScheme, neutralTone]);
+  const syncButtonDisabled = syncStatus.isSyncing || !syncStatus.configured;
 
   const filteredRecent = useMemo(() => {
     const bucketFiltered = recent.filter((note) => noteMatchesBucket(note, selectedBucket));
@@ -265,6 +269,60 @@ export default function LibraryScreen() {
                   </Pressable>
                 </View>
               ) : null}
+            </View>
+          </View>
+
+          <View
+            style={[
+              styles.syncCard,
+              { backgroundColor: palette.surface, borderColor: palette.border },
+            ]}
+          >
+            <View style={styles.syncCardHeader}>
+              <View style={{ flex: 1, gap: 4 }}>
+                <ThemedText type="subtitle" style={{ fontSize: 18 }}>
+                  GitHub Sync
+                </ThemedText>
+                <ThemedText style={{ color: palette.muted }}>
+                  {syncStatus.lastSyncedAt
+                    ? `Last synced ${new Date(syncStatus.lastSyncedAt).toLocaleString()}`
+                    : syncStatus.pendingReason ?? 'Ready to sync your local vault snapshot.'}
+                </ThemedText>
+                {syncConfig?.repoOwner && syncConfig.repoName ? (
+                  <ThemedText style={{ color: palette.muted, fontSize: 12 }}>
+                    {`${syncConfig.repoOwner}/${syncConfig.repoName} (${syncConfig.repoBranch})`}
+                  </ThemedText>
+                ) : null}
+                {syncStatus.lastError ? (
+                  <ThemedText style={{ color: dangerTone(colorScheme).text, fontSize: 12 }}>
+                    {syncStatus.lastError}
+                  </ThemedText>
+                ) : null}
+              </View>
+
+              <Pressable
+                style={({ pressed }) => [
+                  styles.syncButton,
+                  {
+                    backgroundColor: syncButtonDisabled ? palette.surfaceAlt : palette.accent,
+                    borderColor: syncButtonDisabled ? palette.border : palette.accent,
+                    opacity: pressed ? 0.7 : 1,
+                  },
+                ]}
+                disabled={syncButtonDisabled}
+                onPress={() => {
+                  void syncNow();
+                }}
+              >
+                <ThemedText
+                  style={{
+                    color: syncButtonDisabled ? palette.muted : palette.background,
+                    fontSize: 13,
+                  }}
+                >
+                  {syncStatus.isSyncing ? 'Syncing...' : 'Sync now'}
+                </ThemedText>
+              </Pressable>
             </View>
           </View>
 
@@ -602,6 +660,25 @@ const styles = StyleSheet.create({
   section: {
     gap: 12,
     overflow: 'visible',
+  },
+  syncCard: {
+    borderRadius: 18,
+    borderWidth: 1,
+    padding: 14,
+  },
+  syncCardHeader: {
+    flexDirection: 'row',
+    gap: 12,
+    alignItems: 'center',
+  },
+  syncButton: {
+    minWidth: 84,
+    height: 36,
+    paddingHorizontal: 12,
+    borderRadius: 999,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   noteStack: {
     gap: 12,

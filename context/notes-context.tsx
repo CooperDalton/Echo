@@ -9,7 +9,7 @@ import {
   type ReactNode,
 } from 'react';
 
-import { classifyNoteBucket } from '@/lib/notes/classify-note';
+import { classifyNote } from '@/lib/notes/classify-note';
 import {
   createCheckInFilePath,
   createNoteFilePath,
@@ -27,17 +27,23 @@ import {
   type Note,
   type NotesState,
 } from '@/lib/notes/types';
+import { loadSyncConfig, syncPendingReason } from '@/lib/sync/config';
+import { runVaultSync } from '@/lib/sync/service';
+import type { EchoSyncConfig, SyncStatus } from '@/lib/sync/types';
 
 type NotesContextValue = {
   hydrated: boolean;
   recent: Note[];
   reviewed: Note[];
   checkIns: CheckIn[];
+  syncConfig: EchoSyncConfig | null;
+  syncStatus: SyncStatus;
   addRecentNote: (body: string) => void;
   addCheckIn: (input: AddCheckInInput) => void;
   markRecentAsReviewed: (noteId: string) => void;
   deleteRecentNote: (noteId: string) => void;
   deleteReviewedNote: (noteId: string) => void;
+  syncNow: () => Promise<void>;
 };
 
 const NotesContext = createContext<NotesContextValue | null>(null);
@@ -79,6 +85,7 @@ function createNote(body: string): Note {
     updatedAt: createdAt,
     bucket: null,
     classificationStatus: 'pending',
+    classificationMethod: 'unknown',
     classificationConfidence: null,
     echo: createEchoSchedule(createdAt),
     filePath: null,
@@ -160,6 +167,14 @@ function updateNoteInState(
 export function NotesProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<NotesState>(EMPTY_NOTES_STATE);
   const [hydrated, setHydrated] = useState(false);
+  const [syncConfig, setSyncConfig] = useState<EchoSyncConfig | null>(null);
+  const [syncStatus, setSyncStatus] = useState<SyncStatus>({
+    isSyncing: false,
+    configured: false,
+    lastSyncedAt: null,
+    lastError: null,
+    pendingReason: 'Loading sync config...',
+  });
   const inFlightClassifications = useRef(new Set<string>());
 
   useEffect(() => {
@@ -167,8 +182,15 @@ export function NotesProvider({ children }: { children: ReactNode }) {
 
     void (async () => {
       const loaded = await loadNotesState();
+      const loadedSyncConfig = await loadSyncConfig();
       if (!isMounted) return;
       setState(loaded);
+      setSyncConfig(loadedSyncConfig);
+      setSyncStatus((prev) => ({
+        ...prev,
+        configured: syncPendingReason(loadedSyncConfig) === null,
+        pendingReason: syncPendingReason(loadedSyncConfig),
+      }));
       setHydrated(true);
     })();
 
@@ -182,7 +204,8 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     void saveNotesState(state);
   }, [state, hydrated]);
 
-  const queueClassification = useCallback((noteId: string, body: string) => {
+  const queueClassification = useCallback((noteSnapshot: Note) => {
+    const { id: noteId } = noteSnapshot;
     if (inFlightClassifications.current.has(noteId)) return;
     inFlightClassifications.current.add(noteId);
 
@@ -195,14 +218,16 @@ export function NotesProvider({ children }: { children: ReactNode }) {
 
     void (async () => {
       try {
-        const bucket = await classifyNoteBucket(body);
+        const result = await classifyNote(noteSnapshot);
         setState((prev) =>
           updateNoteInState(prev, noteId, (note) => {
             if (note.bucket) return note;
             return {
               ...note,
-              bucket,
+              bucket: result.bucket,
               classificationStatus: 'classified',
+              classificationMethod: result.method,
+              classificationConfidence: result.confidence,
             };
           })
         );
@@ -211,6 +236,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
           updateNoteInState(prev, noteId, (note) => ({
             ...note,
             classificationStatus: 'failed',
+            classificationMethod: 'unknown',
           }))
         );
       } finally {
@@ -227,7 +253,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     );
 
     pending.forEach((note) => {
-      queueClassification(note.id, note.body);
+      queueClassification(note);
     });
   }, [hydrated, state.recent, state.reviewed, queueClassification]);
 
@@ -238,7 +264,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
 
       const note = createNote(trimmed);
       setState((prev) => ({ ...prev, recent: [note, ...prev.recent] }));
-      queueClassification(note.id, note.body);
+      queueClassification(note);
     },
     [queueClassification]
   );
@@ -284,28 +310,66 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     void deleteVaultFile(note?.filePath ?? null);
   }, [state.reviewed]);
 
+  const syncNow = useCallback(async () => {
+    setSyncStatus((prev) => ({
+      ...prev,
+      isSyncing: true,
+      lastError: null,
+    }));
+
+    try {
+      const result = await runVaultSync(state);
+      setState(result.state);
+      setSyncStatus((prev) => ({
+        ...prev,
+        isSyncing: false,
+        configured: true,
+        lastSyncedAt: result.syncedAt,
+        lastError: null,
+        pendingReason: null,
+      }));
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Sync failed.';
+      const config = syncConfig ?? (await loadSyncConfig());
+      setSyncConfig(config);
+      setSyncStatus((prev) => ({
+        ...prev,
+        isSyncing: false,
+        configured: syncPendingReason(config) === null,
+        lastError: message,
+        pendingReason: syncPendingReason(config),
+      }));
+    }
+  }, [state, syncConfig]);
+
   const value = useMemo<NotesContextValue>(
     () => ({
       hydrated,
       recent: state.recent,
       reviewed: state.reviewed,
       checkIns: state.checkIns,
+      syncConfig,
+      syncStatus,
       addRecentNote,
       addCheckIn,
       markRecentAsReviewed,
       deleteRecentNote,
       deleteReviewedNote,
+      syncNow,
     }),
     [
       hydrated,
       state.recent,
       state.reviewed,
       state.checkIns,
+      syncConfig,
+      syncStatus,
       addRecentNote,
       addCheckIn,
       markRecentAsReviewed,
       deleteRecentNote,
       deleteReviewedNote,
+      syncNow,
     ]
   );
 

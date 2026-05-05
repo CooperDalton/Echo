@@ -28,8 +28,8 @@ function NotificationRouter() {
 
   useEffect(() => {
     const url = lastNotificationResponse?.notification.request.content.data?.url;
-    if (url === '/checkin') {
-      router.push('/(tabs)/checkin' as never);
+    if (url === '/checkin' || url === '/checkin-flow') {
+      router.push('/checkin-flow' as never);
     }
   }, [lastNotificationResponse, router]);
 
@@ -44,6 +44,7 @@ export default function RootLayout() {
       <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
         <Stack>
           <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+          <Stack.Screen name="checkin-flow" options={{ headerShown: false }} />
           <Stack.Screen name="modal" options={{ presentation: 'modal', title: 'Modal' }} />
         </Stack>
         <NotificationRouter />

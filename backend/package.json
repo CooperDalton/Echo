@@ -1,0 +1,24 @@
+{
+  "name": "echo-backend",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "vercel dev --listen 8787",
+    "build": "tsc -p tsconfig.json",
+    "start": "vercel dev --listen 8787",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "vercel:build": "vercel build"
+  },
+  "dependencies": {
+    "@octokit/rest": "^22.0.0",
+    "dotenv": "^17.2.3",
+    "openai": "^6.4.0",
+    "zod": "^4.1.12"
+  },
+  "devDependencies": {
+    "@types/node": "^24.9.2",
+    "tsx": "^4.20.6",
+    "typescript": "^5.9.3",
+    "vercel": "^49.0.0"
+  }
+}

@@ -159,7 +159,7 @@ export default function CaptureScreen() {
               goBack();
             }}
           >
-            <IconSymbol name="chevron.left" size={20} color={palette.text} />
+            <IconSymbol name="chevron.left" size={22} color={palette.text} />
           </Pressable>
           <View style={styles.actionsTop}>
             {!editingStanding ? (
@@ -170,7 +170,7 @@ export default function CaptureScreen() {
                 ]}
                 disabled={!submitEnabled}
                 onPress={submitNote}>
-                <ThemedText style={{ color: palette.background, fontSize: 14 }}>Echo</ThemedText>
+                <ThemedText style={{ color: palette.background, fontSize: 15 }}>Echo</ThemedText>
               </Pressable>
             ) : null}
             {editingStanding ? (
@@ -183,8 +183,8 @@ export default function CaptureScreen() {
                 onPress={deleteStandingMessage}
               >
                 <View style={styles.trashIconWrap}>
-                  <IconSymbol name="trash.fill" size={18} color={destructiveFillColor} style={styles.trashIconLayer} />
-                  <IconSymbol name="trash" size={18} color={destructiveOutlineColor} style={styles.trashIconLayer} />
+                  <IconSymbol name="trash.fill" size={19} color={destructiveFillColor} style={styles.trashIconLayer} />
+                  <IconSymbol name="trash" size={19} color={destructiveOutlineColor} style={styles.trashIconLayer} />
                 </View>
               </Pressable>
             ) : null}
@@ -206,7 +206,7 @@ export default function CaptureScreen() {
                 }
                 submitNote();
               }}>
-              <IconSymbol name="checkmark" size={18} color={palette.text} />
+              <IconSymbol name="checkmark" size={20} color={palette.text} />
             </Pressable>
           </View>
         </View>
@@ -261,29 +261,29 @@ const styles = StyleSheet.create({
   secondaryButton: {
     borderWidth: 1,
     borderRadius: 999,
-    width: 36,
-    height: 36,
+    width: 40,
+    height: 40,
     alignItems: 'center',
     justifyContent: 'center',
   },
   primaryButton: {
     borderRadius: 999,
-    height: 36,
-    paddingHorizontal: 12,
+    height: 40,
+    paddingHorizontal: 14,
     alignItems: 'center',
     justifyContent: 'center',
   },
   backButton: {
-    width: 36,
-    height: 36,
+    width: 40,
+    height: 40,
     borderWidth: 1,
     borderRadius: 999,
     alignItems: 'center',
     justifyContent: 'center',
   },
   trashIconWrap: {
-    width: 18,
-    height: 18,
+    width: 19,
+    height: 19,
     alignItems: 'center',
     justifyContent: 'center',
   },
