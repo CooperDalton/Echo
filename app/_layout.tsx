@@ -40,8 +40,10 @@ function NotificationRouter() {
 
 function routeDeepLink(url: string, router: ReturnType<typeof useRouter>) {
   const parsed = Linking.parse(url);
-  const path = parsed.path ?? '';
-  const [kind, id] = path.split('/');
+  const parts = [parsed.hostname, ...(parsed.path ?? '').split('/')].filter(
+    (part): part is string => Boolean(part)
+  );
+  const [kind, id] = parts;
   if (!id) return;
 
   if (kind === 'note') {
