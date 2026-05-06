@@ -1,6 +1,8 @@
-import { useState } from 'react';
+import * as Haptics from 'expo-haptics';
+import { useRef, useState } from 'react';
 import {
   KeyboardAvoidingView,
+  LayoutChangeEvent,
   Platform,
   Pressable,
   StyleSheet,
@@ -29,9 +31,53 @@ const EMOTION_LABELS: Record<CheckInEmotion, string> = {
   angry: 'Angry',
 };
 
+const EMOTION_EMOJIS: Record<CheckInEmotion, string> = {
+  happy: '\u{1F642}',
+  content: '\u{1F60C}',
+  excited: '\u{1F929}',
+  bliss: '\u{1F601}',
+  anxious: '\u{1F62C}',
+  overwhelmed: '\u{1F635}',
+  sad: '\u{1F614}',
+  angry: '\u{1F620}',
+};
+
+const EMOTION_BACKGROUNDS: Record<CheckInEmotion, { light: string; dark: string }> = {
+  happy: { light: '#FBE3A3', dark: '#5A4820' },
+  content: { light: '#D8EFD9', dark: '#274534' },
+  excited: { light: '#FFD3A8', dark: '#5A3421' },
+  bliss: { light: '#F8C8DC', dark: '#573142' },
+  anxious: { light: '#E6D4FF', dark: '#3F3156' },
+  overwhelmed: { light: '#FFD9C9', dark: '#5B382C' },
+  sad: { light: '#CFE3FF', dark: '#2A4160' },
+  angry: { light: '#FFC6C1', dark: '#5E2B28' },
+};
+
 type CheckInStep = 'energy' | 'emotions' | 'write';
 
 const STEPS: CheckInStep[] = ['energy', 'emotions', 'write'];
+const ENERGY_MIN = 1;
+const ENERGY_MAX = 5;
+const SLIDER_THUMB_SIZE = 28;
+
+function renderBatteryDisplay(value: number, activeColor: string, inactiveColor: string) {
+  return (
+    <View style={styles.heroBatteryWrap}>
+      <View style={[styles.heroBatteryBody, { borderColor: activeColor }]}>
+        {[1, 2, 3, 4, 5].map((bar) => (
+          <View
+            key={bar}
+            style={[
+              styles.heroBatteryBar,
+              { backgroundColor: bar <= value ? activeColor : inactiveColor },
+            ]}
+          />
+        ))}
+      </View>
+      <View style={[styles.heroBatteryCap, { backgroundColor: activeColor }]} />
+    </View>
+  );
+}
 
 function createEmptyEmotions(): Record<CheckInEmotion, boolean> {
   return CHECK_IN_EMOTIONS.reduce(
@@ -45,9 +91,12 @@ export default function CheckInFlowScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const palette = Colors[colorScheme];
+  const energySliderRef = useRef<View>(null);
   const { addCheckIn } = useNotes();
   const [stepIndex, setStepIndex] = useState(0);
-  const [energy, setEnergy] = useState(3);
+  const [energy, setEnergy] = useState(1);
+  const [energySliderWidth, setEnergySliderWidth] = useState(0);
+  const [energySliderPageX, setEnergySliderPageX] = useState(0);
   const [emotions, setEmotions] = useState(createEmptyEmotions);
   const [body, setBody] = useState('');
 
@@ -66,6 +115,33 @@ export default function CheckInFlowScreen() {
   function goNext() {
     if (stepIndex >= STEPS.length - 1) return;
     setStepIndex((current) => current + 1);
+  }
+
+  async function handleEnergyChange(value: number) {
+    if (value === energy) return;
+    await Haptics.selectionAsync();
+    setEnergy(value);
+  }
+
+  function handleEnergySliderLayout(event: LayoutChangeEvent) {
+    setEnergySliderWidth(event.nativeEvent.layout.width);
+    energySliderRef.current?.measureInWindow((x) => {
+      setEnergySliderPageX(x);
+    });
+  }
+
+  function updateEnergyFromSlider(pageX: number) {
+    if (energySliderWidth <= 0) return;
+
+    const positionX = pageX - energySliderPageX;
+    const clampedX = Math.max(0, Math.min(positionX, energySliderWidth));
+    const ratio = clampedX / energySliderWidth;
+    const nextEnergy = Math.round(ratio * (ENERGY_MAX - ENERGY_MIN)) + ENERGY_MIN;
+    void handleEnergyChange(nextEnergy);
+  }
+
+  function finishEnergySelection() {
+    goNext();
   }
 
   function saveCheckIn() {
@@ -107,56 +183,92 @@ export default function CheckInFlowScreen() {
           <View style={styles.stepContent}>
             {step === 'energy' ? (
               <>
-                <View style={styles.heroCopy}>
+                <View style={[styles.heroCopy, styles.energyHeroCopy]}>
                   <ThemedText type="subtitle" style={styles.stepTitle}>
                     Energy
                   </ThemedText>
-                  <ThemedText style={[styles.stepDescription, { color: palette.muted }]}>
-                    How much energy do you have right now?
-                  </ThemedText>
                 </View>
-                <View style={styles.energyGrid}>
-                  {[1, 2, 3, 4, 5].map((value) => {
-                    const selected = value === energy;
-                    return (
-                      <Pressable
-                        key={value}
-                        accessibilityLabel={`Energy ${value}`}
-                        onPress={() => {
-                          setEnergy(value);
-                          goNext();
-                        }}
-                        style={({ pressed }) => [
-                          styles.energyButton,
-                          {
-                            backgroundColor: selected ? palette.accent : palette.surface,
-                            borderColor: selected ? palette.accent : palette.border,
-                            opacity: pressed ? 0.7 : 1,
-                          },
-                        ]}>
-                        <ThemedText
-                          style={{
-                            color: selected ? palette.background : palette.text,
-                            fontSize: 28,
-                            fontWeight: '700',
-                          }}>
-                          {value}
-                        </ThemedText>
-                      </Pressable>
-                    );
-                  })}
+                <View style={styles.energyStage}>
+                  <View style={styles.energyDisplayCard}>
+                    {renderBatteryDisplay(energy, palette.accent, palette.border)}
+                  </View>
+                </View>
+                <View style={styles.energySliderCard}>
+                  <View
+                    ref={energySliderRef}
+                    accessible
+                    accessibilityLabel={`Energy slider. Current energy ${energy} out of 5`}
+                    accessibilityRole="adjustable"
+                    accessibilityValue={{ min: ENERGY_MIN, max: ENERGY_MAX, now: energy }}
+                    onAccessibilityAction={(event) => {
+                      if (event.nativeEvent.actionName === 'increment' && energy < ENERGY_MAX) {
+                        void handleEnergyChange(energy + 1);
+                      }
+                      if (event.nativeEvent.actionName === 'decrement' && energy > ENERGY_MIN) {
+                        void handleEnergyChange(energy - 1);
+                      }
+                    }}
+                    accessibilityActions={[
+                      { name: 'increment', label: 'Increase energy' },
+                      { name: 'decrement', label: 'Decrease energy' },
+                    ]}
+                    onLayout={handleEnergySliderLayout}
+                    onStartShouldSetResponder={() => true}
+                    onMoveShouldSetResponder={() => true}
+                    onResponderGrant={(event) => {
+                      updateEnergyFromSlider(event.nativeEvent.pageX);
+                    }}
+                    onResponderMove={(event) => {
+                      updateEnergyFromSlider(event.nativeEvent.pageX);
+                    }}
+                    onResponderRelease={finishEnergySelection}
+                    onResponderTerminate={finishEnergySelection}
+                    style={styles.energySliderInteractive}>
+                    <View
+                      pointerEvents="none"
+                      style={[styles.energySliderTrackBase, { backgroundColor: palette.border }]}
+                    />
+                    <View
+                      pointerEvents="none"
+                      style={[
+                        styles.energySliderTrackFill,
+                        {
+                          backgroundColor: palette.accent,
+                          width: energySliderWidth
+                            ? Math.max(
+                                10,
+                                (energySliderWidth * (energy - ENERGY_MIN)) /
+                                  (ENERGY_MAX - ENERGY_MIN)
+                              )
+                            : 10,
+                        },
+                      ]}
+                    />
+                    <View
+                      pointerEvents="none"
+                      style={[
+                        styles.energyThumb,
+                        {
+                          backgroundColor: palette.accent,
+                          borderColor: palette.surface,
+                          left: energySliderWidth
+                            ? (energySliderWidth * (energy - ENERGY_MIN)) /
+                                (ENERGY_MAX - ENERGY_MIN) -
+                              SLIDER_THUMB_SIZE / 2
+                            : -SLIDER_THUMB_SIZE / 2,
+                        },
+                      ]}
+                    />
+                  </View>
                 </View>
               </>
             ) : null}
 
             {step === 'emotions' ? (
               <>
-                <View style={styles.heroCopy}>
+                <View style={[styles.heroCopy, styles.emotionsHeroCopy]}>
                   <ThemedText type="subtitle" style={styles.stepTitle}>
                     Emotions
-                  </ThemedText>
-                  <ThemedText style={[styles.stepDescription, { color: palette.muted }]}>
-                    Pick anything that fits. You can choose more than one.
                   </ThemedText>
                 </View>
                 <View style={styles.emotionGrid}>
@@ -174,18 +286,23 @@ export default function CheckInFlowScreen() {
                         style={({ pressed }) => [
                           styles.emotionChip,
                           {
-                            backgroundColor: selected
-                              ? Colors[colorScheme].accentSoft
-                              : palette.surface,
+                            backgroundColor: EMOTION_BACKGROUNDS[emotion][colorScheme],
                             borderColor: selected ? palette.accent : palette.border,
                             opacity: pressed ? 0.7 : 1,
                           },
                         ]}>
                         <ThemedText
                           style={{
+                            fontSize: 24,
+                            lineHeight: 30,
+                          }}>
+                          {EMOTION_EMOJIS[emotion]}
+                        </ThemedText>
+                        <ThemedText
+                          style={{
                             color: selected ? palette.accent : palette.text,
-                            fontSize: 16,
-                            fontWeight: selected ? '600' : '400',
+                            fontSize: 15,
+                            fontWeight: selected ? '700' : '500',
                           }}>
                           {EMOTION_LABELS[emotion]}
                         </ThemedText>
@@ -201,9 +318,6 @@ export default function CheckInFlowScreen() {
                 <View style={styles.heroCopy}>
                   <ThemedText type="subtitle" style={styles.stepTitle}>
                     What did you do today?
-                  </ThemedText>
-                  <ThemedText style={[styles.stepDescription, { color: palette.muted }]}>
-                    Write as much or as little as you want.
                   </ThemedText>
                 </View>
                 <TextInput
@@ -275,42 +389,102 @@ const styles = StyleSheet.create({
   },
   stepContent: {
     flex: 1,
-    justifyContent: 'center',
+    justifyContent: 'flex-start',
     gap: 24,
   },
   heroCopy: {
     gap: 8,
   },
+  energyHeroCopy: {
+    alignSelf: 'flex-start',
+    alignItems: 'flex-start',
+  },
+  emotionsHeroCopy: {
+    alignSelf: 'flex-start',
+    alignItems: 'flex-start',
+  },
   stepTitle: {
     fontSize: 30,
   },
-  stepDescription: {
-    fontSize: 16,
-    lineHeight: 24,
-  },
-  energyGrid: {
-    flexDirection: 'row',
-    gap: 12,
-    justifyContent: 'space-between',
-  },
-  energyButton: {
+  energyStage: {
     flex: 1,
-    aspectRatio: 1,
-    borderWidth: 1,
-    borderRadius: 22,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  energyDisplayCard: {
+    width: '100%',
+    maxWidth: 360,
+    paddingHorizontal: 24,
+    paddingVertical: 36,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  heroBatteryWrap: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  heroBatteryBody: {
+    flexDirection: 'row',
+    gap: 10,
+    borderWidth: 5,
+    borderRadius: 22,
+    paddingHorizontal: 16,
+    paddingVertical: 16,
+  },
+  heroBatteryBar: {
+    width: 28,
+    height: 96,
+    borderRadius: 999,
+  },
+  heroBatteryCap: {
+    width: 16,
+    height: 56,
+    borderRadius: 999,
+    marginLeft: 10,
+  },
+  energySliderCard: {
+    paddingHorizontal: 4,
+    paddingVertical: 8,
+  },
+  energySliderInteractive: {
+    height: 44,
+    justifyContent: 'center',
+  },
+  energySliderTrackBase: {
+    height: 8,
+    borderRadius: 999,
+  },
+  energySliderTrackFill: {
+    position: 'absolute',
+    left: 0,
+    height: 8,
+    borderRadius: 999,
+  },
+  energyThumb: {
+    position: 'absolute',
+    top: '50%',
+    width: SLIDER_THUMB_SIZE,
+    height: SLIDER_THUMB_SIZE,
+    borderRadius: 999,
+    borderWidth: 4,
+    marginTop: -(SLIDER_THUMB_SIZE / 2),
   },
   emotionGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: 12,
+    justifyContent: 'space-between',
   },
   emotionChip: {
+    width: '48%',
     borderWidth: 1,
-    borderRadius: 999,
-    paddingHorizontal: 16,
-    paddingVertical: 12,
+    borderRadius: 18,
+    paddingHorizontal: 14,
+    paddingVertical: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'flex-start',
+    gap: 12,
   },
   textArea: {
     flex: 1,

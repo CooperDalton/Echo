@@ -54,6 +54,16 @@ function noteBucketLabel(note: Note): string {
   return 'Unbucketed';
 }
 
+function notePreview(body: string): string {
+  return body.replace(/\s*\n+\s*/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
+function shouldShowBodyOnly(note: Note): boolean {
+  const body = notePreview(note.body);
+  const title = notePreview(note.title);
+  return body.length <= 32 || title.length === 0 || body === title;
+}
+
 export default function LibraryScreen() {
   const colorScheme = useColorScheme() ?? 'light';
   const insets = useSafeAreaInsets();
@@ -63,12 +73,9 @@ export default function LibraryScreen() {
     hydrated,
     recent,
     reviewed,
-    syncConfig,
-    syncStatus,
     markRecentAsReviewed,
     deleteRecentNote,
     deleteReviewedNote,
-    syncNow,
   } = useNotes();
 
   const [searchQuery, setSearchQuery] = useState('');
@@ -84,7 +91,6 @@ export default function LibraryScreen() {
     if (selectedBucket === 'Unbucketed') return neutralTone;
     return bucketTone(selectedBucket, colorScheme);
   }, [selectedBucket, colorScheme, neutralTone]);
-  const syncButtonDisabled = syncStatus.isSyncing || !syncStatus.configured;
 
   const filteredRecent = useMemo(() => {
     const bucketFiltered = recent.filter((note) => noteMatchesBucket(note, selectedBucket));
@@ -272,60 +278,6 @@ export default function LibraryScreen() {
             </View>
           </View>
 
-          <View
-            style={[
-              styles.syncCard,
-              { backgroundColor: palette.surface, borderColor: palette.border },
-            ]}
-          >
-            <View style={styles.syncCardHeader}>
-              <View style={{ flex: 1, gap: 4 }}>
-                <ThemedText type="subtitle" style={{ fontSize: 18 }}>
-                  GitHub Sync
-                </ThemedText>
-                <ThemedText style={{ color: palette.muted }}>
-                  {syncStatus.lastSyncedAt
-                    ? `Last synced ${new Date(syncStatus.lastSyncedAt).toLocaleString()}`
-                    : syncStatus.pendingReason ?? 'Ready to sync your local vault snapshot.'}
-                </ThemedText>
-                {syncConfig?.repoOwner && syncConfig.repoName ? (
-                  <ThemedText style={{ color: palette.muted, fontSize: 12 }}>
-                    {`${syncConfig.repoOwner}/${syncConfig.repoName} (${syncConfig.repoBranch})`}
-                  </ThemedText>
-                ) : null}
-                {syncStatus.lastError ? (
-                  <ThemedText style={{ color: dangerTone(colorScheme).text, fontSize: 12 }}>
-                    {syncStatus.lastError}
-                  </ThemedText>
-                ) : null}
-              </View>
-
-              <Pressable
-                style={({ pressed }) => [
-                  styles.syncButton,
-                  {
-                    backgroundColor: syncButtonDisabled ? palette.surfaceAlt : palette.accent,
-                    borderColor: syncButtonDisabled ? palette.border : palette.accent,
-                    opacity: pressed ? 0.7 : 1,
-                  },
-                ]}
-                disabled={syncButtonDisabled}
-                onPress={() => {
-                  void syncNow();
-                }}
-              >
-                <ThemedText
-                  style={{
-                    color: syncButtonDisabled ? palette.muted : palette.background,
-                    fontSize: 13,
-                  }}
-                >
-                  {syncStatus.isSyncing ? 'Syncing...' : 'Sync now'}
-                </ThemedText>
-              </Pressable>
-            </View>
-          </View>
-
           <View style={styles.section}>
             <ThemedText type="subtitle" style={{ fontSize: 18 }}>
               Recent Notes
@@ -336,6 +288,9 @@ export default function LibraryScreen() {
                 const size = rowSizes[note.id];
                 const actionWidth = size?.width ?? Dimensions.get('window').width;
                 const actionHeight = size?.height;
+                const bodyOnly = shouldShowBodyOnly(note);
+                const bodyText = notePreview(note.body);
+                const titleText = bodyOnly ? bodyText : note.title;
 
                 return (
                   <Swipeable
@@ -446,13 +401,18 @@ export default function LibraryScreen() {
                     >
                       <View style={styles.noteHeaderRow}>
                         <ThemedText style={styles.noteTitle} numberOfLines={1}>
-                          {note.title}
+                          {titleText}
                         </ThemedText>
                         {renderBucketPill(note)}
                       </View>
-                      <ThemedText style={{ color: palette.muted, marginTop: 6 }}>
-                        {note.body}
-                      </ThemedText>
+                      {bodyOnly ? null : (
+                        <ThemedText
+                          style={{ color: palette.muted, marginTop: 6 }}
+                          numberOfLines={2}
+                        >
+                          {bodyText}
+                        </ThemedText>
+                      )}
                     </Pressable>
                   </Swipeable>
                 );
@@ -484,6 +444,9 @@ export default function LibraryScreen() {
                 const size = rowSizes[note.id];
                 const actionWidth = size?.width ?? Dimensions.get('window').width;
                 const actionHeight = size?.height;
+                const bodyOnly = shouldShowBodyOnly(note);
+                const bodyText = notePreview(note.body);
+                const titleText = bodyOnly ? bodyText : note.title;
 
                 return (
                   <Swipeable
@@ -555,13 +518,18 @@ export default function LibraryScreen() {
                     >
                       <View style={styles.noteHeaderRow}>
                         <ThemedText style={styles.noteTitle} numberOfLines={1}>
-                          {note.title}
+                          {titleText}
                         </ThemedText>
                         {renderBucketPill(note)}
                       </View>
-                      <ThemedText style={{ color: palette.muted, marginTop: 6 }}>
-                        {note.body}
-                      </ThemedText>
+                      {bodyOnly ? null : (
+                        <ThemedText
+                          style={{ color: palette.muted, marginTop: 6 }}
+                          numberOfLines={2}
+                        >
+                          {bodyText}
+                        </ThemedText>
+                      )}
                     </Pressable>
                   </Swipeable>
                 );
@@ -660,25 +628,6 @@ const styles = StyleSheet.create({
   section: {
     gap: 12,
     overflow: 'visible',
-  },
-  syncCard: {
-    borderRadius: 18,
-    borderWidth: 1,
-    padding: 14,
-  },
-  syncCardHeader: {
-    flexDirection: 'row',
-    gap: 12,
-    alignItems: 'center',
-  },
-  syncButton: {
-    minWidth: 84,
-    height: 36,
-    paddingHorizontal: 12,
-    borderRadius: 999,
-    borderWidth: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
   },
   noteStack: {
     gap: 12,

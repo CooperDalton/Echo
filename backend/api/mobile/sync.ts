@@ -36,6 +36,9 @@ export default async function handler(
         recent: parsed.snapshot.notes.filter((note) => note.echo.state !== 'reviewed'),
         reviewed: parsed.snapshot.notes.filter((note) => note.echo.state === 'reviewed'),
         checkIns: parsed.snapshot.checkIns,
+        deletedNotes: parsed.snapshot.deletedNotes,
+        bucketPreferences: parsed.snapshot.bucketPreferences,
+        standingMessages: parsed.snapshot.standingMessages,
       },
       parsed.deviceId
     );
@@ -43,6 +46,9 @@ export default async function handler(
     sendJson(res, 200, {
       notes: [...merged.state.recent, ...merged.state.reviewed],
       checkIns: merged.state.checkIns,
+      deletedNotes: merged.state.deletedNotes,
+      bucketPreferences: merged.state.bucketPreferences,
+      standingMessages: merged.state.standingMessages,
       syncedAt: new Date().toISOString(),
       summary: merged.summary,
     });

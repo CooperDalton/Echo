@@ -9,6 +9,7 @@
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "ios": {
+      "bundleIdentifier": "com.cooperdalton.echo",
       "supportsTablet": true
     },
     "android": {
@@ -37,6 +38,19 @@
           "dark": {
             "backgroundColor": "#000000"
           }
+        }
+      ],
+      [
+        "expo-widgets",
+        {
+          "widgets": [
+            {
+              "name": "EchoWidget",
+              "displayName": "Echo",
+              "description": "Quietly resurfaces thoughts you asked Echo to remember.",
+              "supportedFamilies": ["systemSmall", "systemMedium", "systemLarge"]
+            }
+          ]
         }
       ]
     ],

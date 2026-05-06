@@ -1,6 +1,11 @@
 import type { BucketName } from '@/constants/buckets';
-import type { CheckIn, Note, NotesState } from '@/lib/notes/types';
-import type { EchoSyncConfig, RemoteNoteClassification, SyncResult } from '@/lib/sync/types';
+import type { CheckIn, DeletedNote, Note, NotesState } from '@/lib/notes/types';
+import type {
+  EchoSyncConfig,
+  RemoteNoteClassification,
+  RemoteWidgetShortening,
+  SyncResult,
+} from '@/lib/sync/types';
 
 type SyncRequestBody = {
   deviceId: string;
@@ -12,12 +17,18 @@ type SyncRequestBody = {
   snapshot: {
     notes: Note[];
     checkIns: CheckIn[];
+    deletedNotes: DeletedNote[];
+    bucketPreferences: NotesState['bucketPreferences'];
+    standingMessages: NotesState['standingMessages'];
   };
 };
 
 type SyncResponseBody = {
   notes?: Note[];
   checkIns?: CheckIn[];
+  deletedNotes?: DeletedNote[];
+  bucketPreferences?: NotesState['bucketPreferences'];
+  standingMessages?: NotesState['standingMessages'];
   syncedAt?: string;
   summary?: {
     pushedNotes?: number;
@@ -28,6 +39,7 @@ type SyncResponseBody = {
 };
 
 type ClassifyResponseBody = {
+  title?: string;
   bucket?: BucketName;
   confidence?: number | null;
   method?: 'ai';
@@ -41,6 +53,11 @@ type ClassifyRequestBody = {
     name?: string | null;
     branch?: string | null;
   };
+};
+
+type ShortenWidgetNoteResponseBody = {
+  widgetText?: string;
+  model?: string | null;
 };
 
 function normalizeBaseUrl(value: string): string {
@@ -82,6 +99,9 @@ export async function syncVaultSnapshot(
     snapshot: {
       notes: [...state.recent, ...state.reviewed],
       checkIns: state.checkIns,
+      deletedNotes: state.deletedNotes,
+      bucketPreferences: state.bucketPreferences,
+      standingMessages: state.standingMessages,
     },
   };
 
@@ -92,6 +112,9 @@ export async function syncVaultSnapshot(
       recent: (response.notes ?? []).filter((note) => note.echo.state !== 'reviewed'),
       reviewed: (response.notes ?? []).filter((note) => note.echo.state === 'reviewed'),
       checkIns: response.checkIns ?? [],
+      deletedNotes: response.deletedNotes ?? payload.snapshot.deletedNotes,
+      bucketPreferences: response.bucketPreferences ?? payload.snapshot.bucketPreferences,
+      standingMessages: response.standingMessages ?? payload.snapshot.standingMessages,
     },
     syncedAt: response.syncedAt ?? new Date().toISOString(),
     summary: {
@@ -100,6 +123,29 @@ export async function syncVaultSnapshot(
       pulledNotes: response.summary?.pulledNotes ?? response.notes?.length ?? 0,
       pulledCheckIns: response.summary?.pulledCheckIns ?? response.checkIns?.length ?? 0,
     },
+  };
+}
+
+export async function shortenWidgetNoteRemotely(
+  config: EchoSyncConfig,
+  note: Pick<Note, 'id' | 'title' | 'body'>,
+  maxLength: number
+): Promise<RemoteWidgetShortening | null> {
+  if (!config.apiBaseUrl || !config.aiCategorizationEnabled) return null;
+
+  const url = `${normalizeBaseUrl(config.apiBaseUrl)}/api/mobile/shorten-widget-note`;
+  const response = await postJson<ShortenWidgetNoteResponseBody>(url, {
+    note,
+    maxLength,
+  });
+
+  if (typeof response.widgetText !== 'string' || response.widgetText.trim().length === 0) {
+    return null;
+  }
+
+  return {
+    widgetText: response.widgetText.trim(),
+    model: typeof response.model === 'string' ? response.model : null,
   };
 }
 
@@ -125,8 +171,10 @@ export async function classifyNoteRemotely(
   const response = await postJson<ClassifyResponseBody>(url, requestBody);
 
   if (!response.bucket) return null;
+  if (typeof response.title !== 'string' || response.title.trim().length === 0) return null;
 
   return {
+    title: response.title.trim(),
     bucket: response.bucket,
     confidence: typeof response.confidence === 'number' ? response.confidence : null,
     method: 'ai',

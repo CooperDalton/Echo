@@ -81,11 +81,12 @@ Request:
 
 Response:
 
-```json
-{
-  "bucket": "Systems",
-  "confidence": 0.86,
-  "method": "ai",
+  ```json
+  {
+    "title": "GitHub Note Sync",
+    "bucket": "Systems",
+    "confidence": 0.86,
+    "method": "ai",
   "model": "gpt-5.4-nano"
 }
 ```

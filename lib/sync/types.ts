@@ -1,5 +1,5 @@
 import type { BucketName } from '@/constants/buckets';
-import type { CheckIn, Note, NotesState } from '@/lib/notes/types';
+import type { CheckIn, DeletedNote, Note, NotesState } from '@/lib/notes/types';
 
 export type EchoSyncConfig = {
   apiBaseUrl: string | null;
@@ -12,9 +12,15 @@ export type EchoSyncConfig = {
 };
 
 export type RemoteNoteClassification = {
+  title: string;
   bucket: BucketName;
   confidence: number | null;
   method: 'ai';
+  model: string | null;
+};
+
+export type RemoteWidgetShortening = {
+  widgetText: string;
   model: string | null;
 };
 
@@ -29,6 +35,9 @@ export type SyncStatus = {
 export type SyncSnapshot = {
   notes: Note[];
   checkIns: CheckIn[];
+  deletedNotes: DeletedNote[];
+  bucketPreferences: NotesState['bucketPreferences'];
+  standingMessages: NotesState['standingMessages'];
 };
 
 export type SyncResult = {

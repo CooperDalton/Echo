@@ -90,10 +90,18 @@ export type GitHubBlobResponse = {
 
 export type CreateTreeEntry = {
   path: string;
-  mode: '100644';
-  type: 'blob';
-  content: string;
-};
+} & (
+  | {
+      mode: '100644';
+      type: 'blob';
+      content: string;
+    }
+  | {
+      mode: '100644';
+      type: 'blob';
+      sha: null;
+    }
+);
 
 export type CreateTreeResponse = {
   sha: string;

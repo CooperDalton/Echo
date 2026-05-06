@@ -18,6 +18,8 @@ export type EchoSchedule = {
   nextDueAt: string;
   intervalDays: number;
   ease: number;
+  occurrenceCount: number;
+  scheduledDates: string[];
 };
 
 export type Note = {
@@ -30,8 +32,33 @@ export type Note = {
   classificationStatus: NoteClassificationStatus;
   classificationMethod: NoteClassificationMethod;
   classificationConfidence: number | null;
+  widgetText: string | null;
   echo: EchoSchedule;
   filePath: string | null;
+};
+
+export type DeletedNote = {
+  id: string;
+  filePath: string | null;
+  deletedAt: string;
+};
+
+export type StandingMessage = {
+  id: string;
+  text: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type BucketDraft = {
+  name: string;
+  description: string;
+  colorKey: string;
+};
+
+export type BucketPreferences = {
+  builtins: Partial<Record<BucketName, BucketDraft>>;
+  customs: BucketDraft[];
 };
 
 export const CHECK_IN_EMOTIONS = [
@@ -63,4 +90,7 @@ export type NotesState = {
   recent: Note[];
   reviewed: Note[];
   checkIns: CheckIn[];
+  deletedNotes: DeletedNote[];
+  bucketPreferences: BucketPreferences;
+  standingMessages: StandingMessage[];
 };

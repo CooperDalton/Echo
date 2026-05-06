@@ -1,7 +1,7 @@
-import type { CheckIn, Note, NotesState } from '@/lib/notes/types';
-import { classifyNoteRemotely, syncVaultSnapshot } from '@/lib/sync/client';
+import type { CheckIn, DeletedNote, Note, NotesState } from '@/lib/notes/types';
+import { classifyNoteRemotely, shortenWidgetNoteRemotely, syncVaultSnapshot } from '@/lib/sync/client';
 import { isSyncConfigured, loadSyncConfig } from '@/lib/sync/config';
-import type { RemoteNoteClassification, SyncResult } from '@/lib/sync/types';
+import type { RemoteNoteClassification, RemoteWidgetShortening, SyncResult } from '@/lib/sync/types';
 
 function compareIsoDates(left: string, right: string): number {
   const leftTime = Date.parse(left);
@@ -51,14 +51,62 @@ function mergeCheckIns(local: CheckIn[], remote: CheckIn[]): CheckIn[] {
   return [...map.values()].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 }
 
+function mergeDeletedNotes(local: DeletedNote[], remote: DeletedNote[]): DeletedNote[] {
+  const map = new Map<string, DeletedNote>();
+
+  [...local, ...remote].forEach((deletedNote) => {
+    const existing = map.get(deletedNote.id);
+    if (!existing) {
+      map.set(deletedNote.id, deletedNote);
+      return;
+    }
+
+    map.set(
+      deletedNote.id,
+      compareIsoDates(deletedNote.deletedAt, existing.deletedAt) >= 0
+        ? deletedNote
+        : existing
+    );
+  });
+
+  return [...map.values()].sort((a, b) => b.deletedAt.localeCompare(a.deletedAt));
+}
+
+function mergeBucketPreferences(
+  local: NotesState['bucketPreferences'],
+  remote: NotesState['bucketPreferences']
+): NotesState['bucketPreferences'] {
+  return {
+    builtins: {
+      ...remote.builtins,
+      ...local.builtins,
+    },
+    customs: local.customs.length > 0 ? local.customs : remote.customs,
+  };
+}
+
 function mergeSyncedState(localState: NotesState, remoteResult: SyncResult): NotesState {
+  const deletedNotes = mergeDeletedNotes(localState.deletedNotes, remoteResult.state.deletedNotes);
+  const bucketPreferences = mergeBucketPreferences(
+    localState.bucketPreferences,
+    remoteResult.state.bucketPreferences
+  );
+  const deletedIds = new Set(deletedNotes.map((deletedNote) => deletedNote.id));
   const remoteNotes = mergeNotes([], [...remoteResult.state.recent, ...remoteResult.state.reviewed]);
-  const allNotes = mergeNotes([...localState.recent, ...localState.reviewed], remoteNotes);
+  const allNotes = mergeNotes([...localState.recent, ...localState.reviewed], remoteNotes).filter(
+    (note) => !deletedIds.has(note.id)
+  );
 
   return {
     recent: allNotes.filter((note) => note.echo.state !== 'reviewed'),
     reviewed: allNotes.filter((note) => note.echo.state === 'reviewed'),
     checkIns: mergeCheckIns(localState.checkIns, remoteResult.state.checkIns),
+    deletedNotes,
+    bucketPreferences,
+    standingMessages:
+      localState.standingMessages.length > 0
+        ? localState.standingMessages
+        : remoteResult.state.standingMessages,
   };
 }
 
@@ -80,4 +128,12 @@ export async function runVaultSync(state: NotesState): Promise<SyncResult> {
     ...result,
     state: mergeSyncedState(state, result),
   };
+}
+
+export async function shortenWidgetNoteViaBackend(
+  note: Pick<Note, 'id' | 'title' | 'body'>,
+  maxLength: number
+): Promise<RemoteWidgetShortening | null> {
+  const config = await loadSyncConfig();
+  return shortenWidgetNoteRemotely(config, note, maxLength);
 }

@@ -27,6 +27,10 @@ const MAPPING = {
   sparkles: 'auto-awesome',
   'books.vertical': 'menu-book',
   'heart.text.square': 'fact-check',
+  'battery.25': 'battery-1-bar',
+  'battery.50': 'battery-3-bar',
+  'battery.75': 'battery-5-bar',
+  'battery.100': 'battery-full',
 } as IconMapping;
 
 /**

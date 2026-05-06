@@ -1,4 +1,4 @@
-import type { CheckIn, Note, NotesState } from './contracts';
+import type { BucketPreferences, CheckIn, DeletedNote, Note, NotesState, StandingMessage } from './contracts';
 import {
   createCommit,
   createTree,
@@ -10,10 +10,19 @@ import {
   updateRef,
 } from './github';
 import {
+  BUCKET_PREFERENCES_PATH,
+  DELETED_NOTES_PATH,
+  STANDING_MESSAGES_PATH,
   notePath,
   checkInPath,
+  parseBucketPreferences,
+  parseDeletedNotes,
+  parseStandingMessages,
   parseCheckInFile,
   parseNoteFile,
+  serializeBucketPreferences,
+  serializeDeletedNotes,
+  serializeStandingMessages,
   serializeCheckIn,
   serializeNote,
   systemFiles,
@@ -28,6 +37,9 @@ type RepoRef = {
 type RepoSnapshot = {
   notes: Note[];
   checkIns: CheckIn[];
+  deletedNotes: DeletedNote[];
+  bucketPreferences: BucketPreferences;
+  standingMessages: StandingMessage[];
   baseTreeSha: string;
   headCommitSha: string;
   existingFiles: Map<string, string>;
@@ -101,15 +113,48 @@ function mergeCheckIns(local: CheckIn[], remote: CheckIn[]): CheckIn[] {
   return sortNewestFirst([...map.values()]);
 }
 
+function mergeDeletedNotes(local: DeletedNote[], remote: DeletedNote[]): DeletedNote[] {
+  const map = new Map<string, DeletedNote>();
+
+  remote.forEach((deletedNote) => {
+    map.set(deletedNote.id, deletedNote);
+  });
+
+  local.forEach((deletedNote) => {
+    const existing = map.get(deletedNote.id);
+    if (!existing || compareIsoDates(deletedNote.deletedAt, existing.deletedAt) > 0) {
+      map.set(deletedNote.id, deletedNote);
+    }
+  });
+
+  return [...map.values()].sort((a, b) => b.deletedAt.localeCompare(a.deletedAt));
+}
+
+function mergeBucketPreferences(
+  local: BucketPreferences,
+  remote: BucketPreferences
+): BucketPreferences {
+  return {
+    builtins: {
+      ...remote.builtins,
+      ...local.builtins,
+    },
+    customs: local.customs.length > 0 ? local.customs : remote.customs,
+  };
+}
+
 function decodeBase64(content: string): string {
   return Buffer.from(content, 'base64').toString('utf8');
 }
 
-function isVaultMarkdownPath(path: string | undefined): path is string {
+function isVaultManagedPath(path: string | undefined): path is string {
   return Boolean(
     path &&
-      path.endsWith('.md') &&
-      (path.startsWith('Echo/Notes/') || path.startsWith('Echo/Checkins/'))
+      ((path.endsWith('.md') &&
+        (path.startsWith('Echo/Notes/') || path.startsWith('Echo/Checkins/'))) ||
+        path === DELETED_NOTES_PATH ||
+        path === BUCKET_PREFERENCES_PATH ||
+        path === STANDING_MESSAGES_PATH)
   );
 }
 
@@ -120,7 +165,7 @@ async function fetchMarkdownFiles(
   const fileMap = new Map<string, string>();
 
   for (const entry of tree) {
-    if (entry.type !== 'blob' || !entry.sha || !isVaultMarkdownPath(entry.path)) continue;
+    if (entry.type !== 'blob' || !entry.sha || !isVaultManagedPath(entry.path)) continue;
 
     const blob = await getBlob(repo.owner, repo.repo, entry.sha);
     fileMap.set(entry.path, decodeBase64(blob.content));
@@ -137,8 +182,16 @@ export async function loadRepoSnapshot(repo: RepoRef): Promise<RepoSnapshot> {
   const existingFiles = await fetchMarkdownFiles(repo, treeResponse.tree);
   const notes: Note[] = [];
   const checkIns: CheckIn[] = [];
+  const deletedNotes = parseDeletedNotes(existingFiles.get(DELETED_NOTES_PATH) ?? '[]');
+  const bucketPreferences = parseBucketPreferences(
+    existingFiles.get(BUCKET_PREFERENCES_PATH) ?? '{}'
+  );
+  const standingMessages = parseStandingMessages(
+    existingFiles.get(STANDING_MESSAGES_PATH) ?? '[]'
+  );
 
   existingFiles.forEach((markdown, path) => {
+    if (path === DELETED_NOTES_PATH || path === BUCKET_PREFERENCES_PATH || path === STANDING_MESSAGES_PATH) return;
     if (path.startsWith('Echo/Notes/')) {
       const parsed = parseNoteFile(markdown, path);
       if (parsed) notes.push(parsed);
@@ -154,6 +207,9 @@ export async function loadRepoSnapshot(repo: RepoRef): Promise<RepoSnapshot> {
   return {
     notes: sortNewestFirst(notes),
     checkIns: sortNewestFirst(checkIns),
+    deletedNotes,
+    bucketPreferences,
+    standingMessages,
     baseTreeSha: commit.tree.sha,
     headCommitSha: commit.sha,
     existingFiles,
@@ -175,11 +231,22 @@ async function commitFiles(
       content,
     }));
 
-  if (changedEntries.length === 0) {
+  const deletedEntries = [...snapshot.existingFiles.keys()]
+    .filter((path) => isVaultManagedPath(path) && !desiredFiles.has(path))
+    .map((path) => ({
+      path,
+      mode: '100644' as const,
+      type: 'blob' as const,
+      sha: null,
+    }));
+
+  const treeEntries = [...changedEntries, ...deletedEntries];
+
+  if (treeEntries.length === 0) {
     return 0;
   }
 
-  const newTree = await createTree(repo.owner, repo.repo, snapshot.baseTreeSha, changedEntries);
+  const newTree = await createTree(repo.owner, repo.repo, snapshot.baseTreeSha, treeEntries);
   const commit = await createCommit(
     repo.owner,
     repo.repo,
@@ -189,7 +256,7 @@ async function commitFiles(
   );
   await updateRef(repo.owner, repo.repo, repo.branch, commit.sha);
 
-  return changedEntries.length;
+  return treeEntries.length;
 }
 
 export async function syncRepoSnapshot(
@@ -198,8 +265,18 @@ export async function syncRepoSnapshot(
   deviceId: string
 ): Promise<SyncOutput> {
   const remote = await loadRepoSnapshot(repo);
-  const mergedNotes = mergeNotes([...state.recent, ...state.reviewed], remote.notes);
+  const mergedDeletedNotes = mergeDeletedNotes(state.deletedNotes, remote.deletedNotes);
+  const mergedBucketPreferences = mergeBucketPreferences(
+    state.bucketPreferences,
+    remote.bucketPreferences
+  );
+  const deletedIds = new Set(mergedDeletedNotes.map((deletedNote) => deletedNote.id));
+  const mergedNotes = mergeNotes([...state.recent, ...state.reviewed], remote.notes).filter(
+    (note) => !deletedIds.has(note.id)
+  );
   const mergedCheckIns = mergeCheckIns(state.checkIns, remote.checkIns);
+  const mergedStandingMessages =
+    state.standingMessages.length > 0 ? state.standingMessages : remote.standingMessages;
 
   const desiredFiles = new Map<string, string>();
   mergedNotes.forEach((note) => {
@@ -211,6 +288,12 @@ export async function syncRepoSnapshot(
   Object.entries(systemFiles()).forEach(([path, content]) => {
     desiredFiles.set(path, content);
   });
+  desiredFiles.set(DELETED_NOTES_PATH, serializeDeletedNotes(mergedDeletedNotes));
+  desiredFiles.set(
+    BUCKET_PREFERENCES_PATH,
+    serializeBucketPreferences(mergedBucketPreferences)
+  );
+  desiredFiles.set(STANDING_MESSAGES_PATH, serializeStandingMessages(mergedStandingMessages));
 
   const committedFiles = await commitFiles(repo, remote, desiredFiles, deviceId);
 
@@ -219,6 +302,9 @@ export async function syncRepoSnapshot(
       recent: mergedNotes.filter((note) => note.echo.state !== 'reviewed'),
       reviewed: mergedNotes.filter((note) => note.echo.state === 'reviewed'),
       checkIns: mergedCheckIns,
+      deletedNotes: mergedDeletedNotes,
+      bucketPreferences: mergedBucketPreferences,
+      standingMessages: mergedStandingMessages,
     },
     summary: {
       pushedNotes: state.recent.length + state.reviewed.length,

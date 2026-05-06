@@ -4,15 +4,20 @@ import { BUCKETS, type BucketName } from '@/constants/buckets';
 import {
   CHECK_IN_EMOTIONS,
   EMPTY_NOTES_STATE,
+  type BucketDraft,
+  type BucketPreferences,
   type CheckIn,
   type CheckInEmotion,
   type CheckInKind,
+  type DeletedNote,
   type EchoSchedule,
   type Note,
   type NoteClassificationMethod,
   type NoteClassificationStatus,
   type NotesState,
+  type StandingMessage,
 } from '@/lib/notes/types';
+import { normalizeEchoSchedule } from '@/lib/widgets/schedule';
 
 const LEGACY_NOTES_STORAGE_FILE = `${FileSystem.documentDirectory ?? ''}echo-notes-v1.json`;
 const VAULT_ROOT = `${FileSystem.documentDirectory ?? ''}life-os`;
@@ -20,6 +25,9 @@ const ECHO_ROOT = `${VAULT_ROOT}/Echo`;
 const NOTES_ROOT = `${ECHO_ROOT}/Notes`;
 const CHECK_INS_ROOT = `${ECHO_ROOT}/Checkins`;
 const SYSTEM_ROOT = `${ECHO_ROOT}/_system`;
+const DELETED_NOTES_FILE = `${SYSTEM_ROOT}/deleted-notes.json`;
+const BUCKET_PREFERENCES_FILE = `${SYSTEM_ROOT}/bucket-preferences.json`;
+const STANDING_MESSAGES_FILE = `${SYSTEM_ROOT}/standing-messages.json`;
 
 type FrontmatterValue = string | boolean | number | null | FrontmatterObject;
 interface FrontmatterObject {
@@ -61,6 +69,10 @@ function parseScalar(raw: string): FrontmatterValue {
   return trimmed;
 }
 
+function normalizeMarkdownBody(body: string): string {
+  return body.replace(/^(?:[ \t]*\r?\n)+/, '').trimEnd();
+}
+
 function parseFrontmatter(markdown: string): { frontmatter: Frontmatter; body: string } | null {
   if (!markdown.startsWith('---\n')) return null;
 
@@ -68,7 +80,7 @@ function parseFrontmatter(markdown: string): { frontmatter: Frontmatter; body: s
   if (endIndex === -1) return null;
 
   const rawFrontmatter = markdown.slice(4, endIndex).split('\n');
-  const body = markdown.slice(endIndex + 4).replace(/^\n/, '');
+  const body = normalizeMarkdownBody(markdown.slice(endIndex + 4));
   const frontmatter: Frontmatter = {};
   let activeParent: string | null = null;
 
@@ -104,7 +116,7 @@ function parseFrontmatter(markdown: string): { frontmatter: Frontmatter; body: s
     activeParent = null;
   }
 
-  return { frontmatter, body: body.trimEnd() };
+  return { frontmatter, body };
 }
 
 function quoteYaml(value: string): string {
@@ -140,20 +152,7 @@ function slugifyTitle(title: string): string {
 }
 
 function defaultEcho(createdAt: string): EchoSchedule {
-  const nextDue = new Date(createdAt);
-  if (Number.isNaN(nextDue.getTime())) {
-    nextDue.setTime(Date.now());
-  }
-  nextDue.setDate(nextDue.getDate() + 1);
-
-  return {
-    enabled: true,
-    state: 'new',
-    lastReviewedAt: null,
-    nextDueAt: nextDue.toISOString(),
-    intervalDays: 1,
-    ease: 2.5,
-  };
+  return normalizeEchoSchedule(null, createdAt, `legacy-${createdAt}`);
 }
 
 function getObject(value: FrontmatterValue | undefined): Record<string, FrontmatterValue> {
@@ -188,6 +187,7 @@ function serializeNote(note: Note): string {
     `created_at: ${note.createdAt}`,
     `updated_at: ${note.updatedAt}`,
     `bucket: ${note.bucket ? quoteYaml(note.bucket) : ''}`,
+    `widget_text: ${formatYamlValue(note.widgetText)}`,
     'status: active',
     'source: mobile',
     'classification:',
@@ -201,6 +201,8 @@ function serializeNote(note: Note): string {
     `  next_due_at: ${note.echo.nextDueAt}`,
     `  interval_days: ${note.echo.intervalDays}`,
     `  ease: ${note.echo.ease}`,
+    `  occurrence_count: ${note.echo.occurrenceCount}`,
+    `  scheduled_dates: ${quoteYaml(note.echo.scheduledDates.join(','))}`,
     '---',
     '',
     note.body,
@@ -267,20 +269,30 @@ function parseNoteFile(markdown: string, filePath: string): Note | null {
     classificationMethod,
     classificationConfidence:
       typeof classification.confidence === 'number' ? classification.confidence : null,
-    echo: {
-      enabled: typeof echo.enabled === 'boolean' ? echo.enabled : true,
-      state: echo.state === 'due' || echo.state === 'reviewed' ? echo.state : 'new',
-      lastReviewedAt:
-        typeof echo.last_reviewed_at === 'string' && echo.last_reviewed_at.length > 0
-          ? echo.last_reviewed_at
-          : null,
-      nextDueAt:
-        typeof echo.next_due_at === 'string'
-          ? echo.next_due_at
-          : defaultEcho(frontmatter.created_at).nextDueAt,
-      intervalDays: typeof echo.interval_days === 'number' ? echo.interval_days : 1,
-      ease: typeof echo.ease === 'number' ? echo.ease : 2.5,
-    },
+    widgetText: typeof frontmatter.widget_text === 'string' ? frontmatter.widget_text : null,
+    echo: normalizeEchoSchedule(
+      {
+        enabled: typeof echo.enabled === 'boolean' ? echo.enabled : true,
+        state: echo.state === 'due' || echo.state === 'reviewed' ? echo.state : 'new',
+        lastReviewedAt:
+          typeof echo.last_reviewed_at === 'string' && echo.last_reviewed_at.length > 0
+            ? echo.last_reviewed_at
+            : null,
+        nextDueAt:
+          typeof echo.next_due_at === 'string'
+            ? echo.next_due_at
+            : defaultEcho(frontmatter.created_at).nextDueAt,
+        intervalDays: typeof echo.interval_days === 'number' ? echo.interval_days : 1,
+        ease: typeof echo.ease === 'number' ? echo.ease : 2.5,
+        occurrenceCount: typeof echo.occurrence_count === 'number' ? echo.occurrence_count : 0,
+        scheduledDates:
+          typeof echo.scheduled_dates === 'string' && echo.scheduled_dates.length > 0
+            ? echo.scheduled_dates.split(',').map((value) => value.trim()).filter(Boolean)
+            : [],
+      },
+      frontmatter.created_at,
+      frontmatter.id
+    ),
     filePath: relativeVaultPath(filePath),
   };
 }
@@ -373,6 +385,137 @@ async function writeSystemFiles(): Promise<void> {
   );
 }
 
+function normalizeDeletedNote(value: unknown): DeletedNote | null {
+  if (!value || typeof value !== 'object') return null;
+
+  const deletedNote = value as Partial<DeletedNote>;
+  if (typeof deletedNote.id !== 'string' || typeof deletedNote.deletedAt !== 'string') {
+    return null;
+  }
+  if (
+    !(
+      typeof deletedNote.filePath === 'string' ||
+      deletedNote.filePath === null ||
+      deletedNote.filePath === undefined
+    )
+  ) {
+    return null;
+  }
+
+  return {
+    id: deletedNote.id,
+    filePath: deletedNote.filePath ?? null,
+    deletedAt: deletedNote.deletedAt,
+  };
+}
+
+async function loadDeletedNotes(): Promise<DeletedNote[]> {
+  if (!(await fileExists(DELETED_NOTES_FILE))) return [];
+
+  try {
+    const raw = await FileSystem.readAsStringAsync(DELETED_NOTES_FILE);
+    const parsed = JSON.parse(raw) as unknown;
+    if (!Array.isArray(parsed)) return [];
+
+    return parsed
+      .map(normalizeDeletedNote)
+      .filter((deletedNote): deletedNote is DeletedNote => deletedNote !== null)
+      .sort((a, b) => b.deletedAt.localeCompare(a.deletedAt));
+  } catch {
+    return [];
+  }
+}
+
+function normalizeBucketDraft(value: unknown): BucketDraft | null {
+  if (!value || typeof value !== 'object') return null;
+  const bucketDraft = value as Partial<BucketDraft>;
+  if (
+    typeof bucketDraft.name !== 'string' ||
+    typeof bucketDraft.description !== 'string' ||
+    typeof bucketDraft.colorKey !== 'string'
+  ) {
+    return null;
+  }
+
+  return {
+    name: bucketDraft.name,
+    description: bucketDraft.description,
+    colorKey: bucketDraft.colorKey,
+  };
+}
+
+async function loadBucketPreferences(): Promise<BucketPreferences> {
+  if (!(await fileExists(BUCKET_PREFERENCES_FILE))) {
+    return EMPTY_NOTES_STATE.bucketPreferences;
+  }
+
+  try {
+    const raw = await FileSystem.readAsStringAsync(BUCKET_PREFERENCES_FILE);
+    const parsed = JSON.parse(raw) as unknown;
+    if (!parsed || typeof parsed !== 'object') {
+      return EMPTY_NOTES_STATE.bucketPreferences;
+    }
+
+    const builtinsInput =
+      'builtins' in parsed && parsed.builtins && typeof parsed.builtins === 'object'
+        ? (parsed.builtins as Record<string, unknown>)
+        : {};
+    const customsInput =
+      'customs' in parsed && Array.isArray(parsed.customs) ? parsed.customs : [];
+
+    const builtins = BUCKETS.reduce<BucketPreferences['builtins']>((result, bucket) => {
+      const normalized = normalizeBucketDraft(builtinsInput[bucket]);
+      if (!normalized) return result;
+      return { ...result, [bucket]: normalized };
+    }, {});
+
+    return {
+      builtins,
+      customs: customsInput
+        .map(normalizeBucketDraft)
+        .filter((bucketDraft): bucketDraft is BucketDraft => bucketDraft !== null),
+    };
+  } catch {
+    return EMPTY_NOTES_STATE.bucketPreferences;
+  }
+}
+
+function normalizeStandingMessage(value: unknown): StandingMessage | null {
+  if (!value || typeof value !== 'object') return null;
+  const standingMessage = value as Partial<StandingMessage>;
+  if (
+    typeof standingMessage.id !== 'string' ||
+    typeof standingMessage.text !== 'string' ||
+    typeof standingMessage.createdAt !== 'string' ||
+    typeof standingMessage.updatedAt !== 'string'
+  ) {
+    return null;
+  }
+
+  return {
+    id: standingMessage.id,
+    text: standingMessage.text,
+    createdAt: standingMessage.createdAt,
+    updatedAt: standingMessage.updatedAt,
+  };
+}
+
+async function loadStandingMessages(): Promise<StandingMessage[]> {
+  if (!(await fileExists(STANDING_MESSAGES_FILE))) return [];
+
+  try {
+    const raw = await FileSystem.readAsStringAsync(STANDING_MESSAGES_FILE);
+    const parsed = JSON.parse(raw) as unknown;
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .map(normalizeStandingMessage)
+      .filter((message): message is StandingMessage => message !== null)
+      .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+  } catch {
+    return [];
+  }
+}
+
 function sortNewestFirst<T extends { createdAt: string }>(items: T[]): T[] {
   return [...items].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 }
@@ -409,6 +552,7 @@ async function loadLegacyState(): Promise<NotesState> {
         classificationStatus: note.classificationStatus,
         classificationMethod: note.classificationMethod ?? 'unknown',
         classificationConfidence: null,
+        widgetText: typeof note.widgetText === 'string' ? note.widgetText : null,
         echo: note.echo ?? defaultEcho(note.createdAt),
         filePath: null,
       };
@@ -421,7 +565,14 @@ async function loadLegacyState(): Promise<NotesState> {
       ? parsed.reviewed.map(normalizeNote).filter((note): note is Note => note !== null)
       : [];
 
-    return { recent, reviewed, checkIns: [] };
+    return {
+      recent,
+      reviewed,
+      checkIns: [],
+      deletedNotes: [],
+      bucketPreferences: EMPTY_NOTES_STATE.bucketPreferences,
+      standingMessages: [],
+    };
   } catch {
     return EMPTY_NOTES_STATE;
   }
@@ -436,18 +587,32 @@ export async function loadNotesState(): Promise<NotesState> {
 
     const noteFiles = await readMarkdownFiles(NOTES_ROOT);
     const checkInFiles = await readMarkdownFiles(CHECK_INS_ROOT);
+    const deletedNotes = await loadDeletedNotes();
+    const bucketPreferences = await loadBucketPreferences();
+    const standingMessages = await loadStandingMessages();
+    const deletedIds = new Set(deletedNotes.map((deletedNote) => deletedNote.id));
     const notes = noteFiles
       .map((file) => parseNoteFile(file.markdown, file.path))
-      .filter((note): note is Note => note !== null);
+      .filter((note): note is Note => note !== null && !deletedIds.has(note.id));
     const checkIns = checkInFiles
       .map((file) => parseCheckInFile(file.markdown, file.path))
       .filter((checkIn): checkIn is CheckIn => checkIn !== null);
 
-    if (notes.length > 0 || checkIns.length > 0) {
+    if (
+      notes.length > 0 ||
+      checkIns.length > 0 ||
+      deletedNotes.length > 0 ||
+      bucketPreferences.customs.length > 0 ||
+      Object.keys(bucketPreferences.builtins).length > 0 ||
+      standingMessages.length > 0
+    ) {
       return {
         recent: sortNewestFirst(notes.filter((note) => note.echo.state !== 'reviewed')),
         reviewed: sortNewestFirst(notes.filter((note) => note.echo.state === 'reviewed')),
         checkIns: sortNewestFirst(checkIns),
+        deletedNotes,
+        bucketPreferences,
+        standingMessages,
       };
     }
 
@@ -480,6 +645,23 @@ export async function saveNotesState(state: NotesState): Promise<void> {
         const path = checkInPath(checkIn);
         await writeMarkdownFile(path, serializeCheckIn({ ...checkIn, filePath: relativeVaultPath(path) }));
       })
+    );
+
+    await Promise.all(
+      state.deletedNotes.map((deletedNote) => deleteVaultFile(deletedNote.filePath))
+    );
+
+    await FileSystem.writeAsStringAsync(
+      DELETED_NOTES_FILE,
+      JSON.stringify(state.deletedNotes, null, 2)
+    );
+    await FileSystem.writeAsStringAsync(
+      BUCKET_PREFERENCES_FILE,
+      JSON.stringify(state.bucketPreferences, null, 2)
+    );
+    await FileSystem.writeAsStringAsync(
+      STANDING_MESSAGES_FILE,
+      JSON.stringify(state.standingMessages, null, 2)
     );
   } catch {
     // Keep in-memory state as source-of-truth even when persistence fails.

@@ -1,4 +1,4 @@
-import { Pressable, ScrollView, StyleSheet, View, Modal, TextInput } from 'react-native';
+import { Alert, Pressable, ScrollView, StyleSheet, View, Modal, TextInput } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useState, useCallback, useEffect, useMemo } from 'react';
 import { useLocalSearchParams, useRouter } from 'expo-router';
@@ -6,13 +6,12 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { useNotes } from '@/context/notes-context';
-import { BUCKET_COLORS, BUCKETS, type BucketName } from '@/constants/buckets';
+import { BUCKETS, type BucketName } from '@/constants/buckets';
 import { Colors } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
+import type { BucketDraft } from '@/lib/notes/types';
 
 // Removed schedule rules; no schedule configuration shown in UI
-
-const initialStandingMessages = ['Slow down, capture clearly.', 'Keep the buckets semantic.'];
 
 // Preset color themes available for new buckets (12 options)
 const PRESET_COLORS = {
@@ -68,6 +67,15 @@ const PRESET_COLORS = {
 } as const;
 type PresetKey = keyof typeof PRESET_COLORS;
 
+const PRESET_COLOR_KEYS = Object.keys(PRESET_COLORS) as PresetKey[];
+const BUILTIN_COLOR_KEYS: Record<BucketName, PresetKey> = {
+  'Business Ideas': 'mint',
+  Reflections: 'indigo',
+  'Game Dev': 'purple',
+  Family: 'orange',
+  Systems: 'teal',
+};
+
 function presetTone(key: PresetKey, colorScheme: 'light' | 'dark') {
   const c = PRESET_COLORS[key];
   return colorScheme === 'dark'
@@ -75,11 +83,10 @@ function presetTone(key: PresetKey, colorScheme: 'light' | 'dark') {
     : { bg: c.lightBg, border: c.lightBorder, text: c.lightText };
 }
 
-function bucketTone(bucket: BucketName, colorScheme: 'light' | 'dark') {
-  const color = BUCKET_COLORS[bucket];
-  return colorScheme === 'dark'
-    ? { bg: color.darkBg, border: color.darkBorder, text: color.darkText }
-    : { bg: color.lightBg, border: color.lightBorder, text: color.lightText };
+function normalizePresetKey(value: string): PresetKey {
+  return PRESET_COLOR_KEYS.includes(value as PresetKey)
+    ? (value as PresetKey)
+    : PRESET_COLOR_KEYS[0];
 }
 
 function formatEchoDate(createdAt: string): string {
@@ -103,7 +110,21 @@ export default function EchoScreen() {
   const insets = useSafeAreaInsets();
   const palette = Colors[colorScheme];
   const router = useRouter();
-  const { recent, reviewed } = useNotes();
+  const {
+    recent,
+    reviewed,
+    bucketPreferences,
+    standingMessages,
+    saveBuiltinBucketDraft,
+    addCustomBucketDraft,
+    updateCustomBucketDraft,
+    deleteCustomBucketDraft,
+    upsertStandingMessage,
+    deleteStandingMessage,
+    syncConfig,
+    syncStatus,
+    syncNow,
+  } = useNotes();
   const { standingAction, standingId, standingText, standingNonce } = useLocalSearchParams<{
     standingAction?: string;
     standingId?: string;
@@ -116,13 +137,9 @@ export default function EchoScreen() {
   const [newBucketName, setNewBucketName] = useState('');
   const [newBucketDescription, setNewBucketDescription] = useState('');
   const [selectedColorKey, setSelectedColorKey] = useState<PresetKey | null>(null);
-  const [customBuckets, setCustomBuckets] = useState<
-    { name: string; description: string; colorKey: PresetKey }[]
-  >([]);
   const [colorMenuOpen, setColorMenuOpen] = useState(false);
   const [widgetPreviewEnabled, setWidgetPreviewEnabled] = useState(true);
   const [standingMessagesEnabled, setStandingMessagesEnabled] = useState(true);
-  const [standingMessages, setStandingMessages] = useState(initialStandingMessages);
   // Inspect/edit modal state
   const [inspectOpen, setInspectOpen] = useState(false);
   const [activeBucket, setActiveBucket] = useState<
@@ -135,20 +152,73 @@ export default function EchoScreen() {
   const [inspectColorKey, setInspectColorKey] = useState<PresetKey | null>(null);
   const [inspectColorMenuOpen, setInspectColorMenuOpen] = useState(false);
 
+  const customBuckets = bucketPreferences.customs;
+
+  const getBuiltinDraft = useCallback((name: BucketName): BucketDraft => {
+    return bucketPreferences.builtins[name] ?? {
+      name,
+      description: '',
+      colorKey: BUILTIN_COLOR_KEYS[name],
+    };
+  }, [bucketPreferences.builtins]);
+  const getBuiltinTone = useCallback(
+    (name: BucketName) => presetTone(normalizePresetKey(getBuiltinDraft(name).colorKey), colorScheme),
+    [colorScheme, getBuiltinDraft]
+  );
+  const getBucketDisplayName = useCallback(
+    (name: BucketName) => getBuiltinDraft(name).name,
+    [getBuiltinDraft]
+  );
+  const isColorAvailable = useCallback(
+    (
+      colorKey: PresetKey,
+      exceptBucket?: { type: 'builtin'; name: BucketName } | { type: 'custom'; index: number }
+    ) => {
+      const usedByBuiltin = BUCKETS.some(
+        (name) => exceptBucket?.type !== 'builtin' || exceptBucket.name !== name
+          ? getBuiltinDraft(name).colorKey === colorKey
+          : false
+      );
+      const usedByCustom = customBuckets.some(
+        (bucket, index) => exceptBucket?.type !== 'custom' || exceptBucket.index !== index
+          ? bucket.colorKey === colorKey
+          : false
+      );
+
+      return !usedByBuiltin && !usedByCustom;
+    },
+    [customBuckets, getBuiltinDraft]
+  );
+  const nextAvailableColorKey = useCallback(
+    (exceptBucket?: { type: 'builtin'; name: BucketName } | { type: 'custom'; index: number }) =>
+      PRESET_COLOR_KEYS.find((key) => isColorAvailable(key, exceptBucket)) ?? PRESET_COLOR_KEYS[0],
+    [isColorAvailable]
+  );
+
+  const openNewBucket = useCallback(() => {
+    setSelectedColorKey((current) => current ?? nextAvailableColorKey());
+    setColorMenuOpen(false);
+    setBucketModalOpen(true);
+  }, [nextAvailableColorKey]);
+
   const openBuiltin = useCallback((name: BucketName) => {
+    const draft = getBuiltinDraft(name);
     setActiveBucket({ type: 'builtin', name });
-    setInspectName(name);
-    setInspectDescription('');
-    setInspectColorKey(null);
+    setInspectName(draft.name);
+    setInspectDescription(draft.description);
+    setInspectColorKey(normalizePresetKey(draft.colorKey));
+    setInspectColorMenuOpen(false);
     setInspectOpen(true);
-  }, []);
+  }, [getBuiltinDraft]);
 
   const openCustom = useCallback((index: number) => {
     const b = customBuckets[index];
+    if (!b) return;
     setActiveBucket({ type: 'custom', index });
     setInspectName(b.name);
     setInspectDescription(b.description);
-    setInspectColorKey(b.colorKey);
+    setInspectColorKey(normalizePresetKey(b.colorKey));
+    setInspectColorMenuOpen(false);
     setInspectOpen(true);
   }, [customBuckets]);
 
@@ -160,7 +230,8 @@ export default function EchoScreen() {
 
     if (standingAction === 'delete') {
       if (hasValidId) {
-        setStandingMessages((prev) => prev.filter((_, index) => index !== parsedId));
+        const message = standingMessages[parsedId];
+        if (message) deleteStandingMessage(message.id);
       }
       router.replace('/echo');
       return;
@@ -169,17 +240,21 @@ export default function EchoScreen() {
     if (typeof standingText === 'string') {
       const trimmed = standingText.trim();
       if (trimmed.length > 0) {
-        setStandingMessages((prev) => {
-          if (hasValidId && parsedId < prev.length) {
-            return prev.map((message, index) => (index === parsedId ? trimmed : message));
-          }
-          return [...prev, trimmed];
-        });
+        upsertStandingMessage(hasValidId ? standingMessages[parsedId]?.id ?? null : null, trimmed);
       }
     }
 
     router.replace('/echo');
-  }, [standingAction, standingId, standingText, standingNonce, router]);
+  }, [
+    deleteStandingMessage,
+    router,
+    standingAction,
+    standingId,
+    standingMessages,
+    standingText,
+    standingNonce,
+    upsertStandingMessage,
+  ]);
 
   const bucketSummary = useMemo(() => {
     const allNotes = [...recent, ...reviewed];
@@ -203,6 +278,7 @@ export default function EchoScreen() {
           : formatEchoDate(note.createdAt),
       }));
   }, [recent, reviewed]);
+  const syncButtonDisabled = syncStatus.isSyncing || !syncStatus.configured;
 
   return (
     <ThemedView style={[styles.screen, { paddingTop: insets.top }]}> 
@@ -215,7 +291,7 @@ export default function EchoScreen() {
           {/* Buckets grid */}
           <View style={styles.bucketGrid}>
             {bucketSummary.map((bucket) => {
-              const tone = bucketTone(bucket.name, colorScheme);
+              const tone = getBuiltinTone(bucket.name);
               return (
                 <Pressable
                   key={bucket.name}
@@ -225,7 +301,7 @@ export default function EchoScreen() {
                     { backgroundColor: tone.bg, borderColor: tone.border, opacity: pressed ? 0.85 : 1 },
                   ]}
                 >
-                  <ThemedText style={{ fontSize: 15, color: tone.text }}>{bucket.name}</ThemedText>
+                  <ThemedText style={{ fontSize: 15, color: tone.text }}>{getBucketDisplayName(bucket.name)}</ThemedText>
                   <ThemedText style={{ color: tone.text, marginTop: 6, fontSize: 13 }}>
                     {bucket.count} notes
                   </ThemedText>
@@ -234,7 +310,7 @@ export default function EchoScreen() {
             })}
 
             {customBuckets.map((bucket, idx) => {
-              const tone = presetTone(bucket.colorKey, colorScheme);
+              const tone = presetTone(normalizePresetKey(bucket.colorKey), colorScheme);
               return (
                 <Pressable
                   key={`custom-${bucket.name}`}
@@ -252,7 +328,7 @@ export default function EchoScreen() {
 
             {/* Add bucket card */}
             <Pressable
-              onPress={() => setBucketModalOpen(true)}
+              onPress={openNewBucket}
               style={({ pressed }) => [
                 styles.bucketCard,
                 styles.addBucketCard,
@@ -266,7 +342,7 @@ export default function EchoScreen() {
           {/* New bucket modal */}
           <Modal visible={bucketModalOpen} transparent animationType="fade">
             <View style={styles.modalOverlay}>
-              <Pressable style={[styles.modalCard, { backgroundColor: palette.surface, borderColor: palette.border }]} onPress={() => { if (colorMenuOpen) setColorMenuOpen(false); }}>
+              <View style={[styles.modalCard, { backgroundColor: palette.surface, borderColor: palette.border }]}>
                 <ThemedText type="subtitle" style={{ fontSize: 18, marginBottom: 6 }}>
                   New Bucket
                 </ThemedText>
@@ -312,7 +388,7 @@ export default function EchoScreen() {
                       <Pressable onPress={(e) => e.stopPropagation()} style={[styles.colorDropdownMenu, { backgroundColor: palette.surface, borderColor: palette.border }]}>
                         {Object.keys(PRESET_COLORS).map((key) => {
                           const k = key as PresetKey;
-                          const disabled = customBuckets.some((b) => b.colorKey === k);
+                          const disabled = !isColorAvailable(k);
                           const tone = presetTone(k, colorScheme);
                           return (
                             <Pressable
@@ -328,10 +404,14 @@ export default function EchoScreen() {
                                 {
                                   backgroundColor: tone.bg,
                                   borderColor: tone.border,
-                                  opacity: disabled ? 0.4 : 1,
+                                  opacity: disabled ? 0.38 : 1,
                                 },
                               ]}
-                            />
+                            >
+                              {disabled ? (
+                                <View style={[styles.colorTakenSlash, { backgroundColor: palette.text }]} />
+                              ) : null}
+                            </Pressable>
                           );
                         })}
                       </Pressable>
@@ -365,12 +445,14 @@ export default function EchoScreen() {
                       { borderColor: palette.border, backgroundColor: palette.surface, opacity: pressed ? 0.7 : 1 },
                     ]}
                     onPress={() => {
-                      if (!newBucketName.trim() || !selectedColorKey) return;
-                      if (customBuckets.some((b) => b.colorKey === selectedColorKey)) return;
-                      setCustomBuckets((prev) => [
-                        ...prev,
-                        { name: newBucketName.trim(), description: newBucketDescription.trim(), colorKey: selectedColorKey },
-                      ]);
+                      const colorKey = selectedColorKey ?? nextAvailableColorKey();
+                      if (!newBucketName.trim()) return;
+                      if (!isColorAvailable(colorKey)) return;
+                      addCustomBucketDraft({
+                        name: newBucketName.trim(),
+                        description: newBucketDescription.trim(),
+                        colorKey,
+                      });
                       setNewBucketName('');
                       setNewBucketDescription('');
                       setSelectedColorKey(null);
@@ -380,7 +462,7 @@ export default function EchoScreen() {
                     <ThemedText style={{ color: palette.text }}>Save</ThemedText>
                   </Pressable>
                 </View>
-              </Pressable>
+              </View>
             </View>
           </Modal>
         </View>
@@ -389,22 +471,16 @@ export default function EchoScreen() {
         <Modal visible={inspectOpen} transparent animationType="fade">
           <View style={styles.modalOverlay}>
             {activeBucket ? (
-              <Pressable style={[styles.modalCard, { backgroundColor: palette.surface, borderColor: palette.border }]} onPress={() => { if (inspectColorMenuOpen) setInspectColorMenuOpen(false); }}> 
+              <View style={[styles.modalCard, { backgroundColor: palette.surface, borderColor: palette.border }]}> 
                 {(() => {
-                  const tone = activeBucket.type === 'builtin'
-                    ? bucketTone(activeBucket.name, colorScheme)
-                    : presetTone(customBuckets[activeBucket.index].colorKey, colorScheme);
-                  const isCustom = activeBucket.type === 'custom';
+                  const activeCustomBucket = activeBucket.type === 'custom' ? customBuckets[activeBucket.index] : null;
+                  if (activeBucket.type === 'custom' && !activeCustomBucket) return null;
                   return (
                     <>
-                      <ThemedText type="subtitle" style={{ fontSize: 18, marginBottom: 6, color: tone.text }}>
-                        {isCustom ? 'Edit Bucket' : 'Bucket'}
-                      </ThemedText>
                       <View style={styles.nameColorRow}>
                         <View style={{ flex: 1 }}>
                           <ThemedText style={{ fontSize: 13, marginBottom: 6 }}>Name</ThemedText>
                           <TextInput
-                            editable={isCustom}
                             placeholder="Bucket name"
                             value={inspectName}
                             onChangeText={setInspectName}
@@ -414,7 +490,6 @@ export default function EchoScreen() {
                         </View>
                         <View style={styles.colorDropdownWrap}>
                           <Pressable
-                            disabled={!isCustom}
                             style={({ pressed }) => [
                               styles.colorDropdownTrigger,
                               {
@@ -423,14 +498,14 @@ export default function EchoScreen() {
                                 opacity: pressed ? 0.7 : 1,
                               },
                             ]}
-                            onPress={(e) => { if (!isCustom) return; e.stopPropagation(); setInspectColorMenuOpen((o) => !o); }}
+                            onPress={(e) => { e.stopPropagation(); setInspectColorMenuOpen((o) => !o); }}
                           >
                             <View
                               style={[
                                 // Match option chip style but keep original trigger size
                                 styles.colorChip,
                                 { width: 20, height: 20, borderWidth: 2 },
-                                isCustom && inspectColorKey
+                                inspectColorKey
                                   ? {
                                       backgroundColor: presetTone(inspectColorKey, colorScheme).bg,
                                       borderColor: presetTone(inspectColorKey, colorScheme).border,
@@ -439,11 +514,11 @@ export default function EchoScreen() {
                               ]}
                             />
                           </Pressable>
-                          {isCustom && inspectColorMenuOpen ? (
+                          {inspectColorMenuOpen ? (
                             <Pressable onPress={(e) => e.stopPropagation()} style={[styles.colorDropdownMenu, { backgroundColor: palette.surface, borderColor: palette.border }]}>
                               {Object.keys(PRESET_COLORS).map((key) => {
                                 const k = key as PresetKey;
-                                const disabled = customBuckets.some((b, i) => i !== (activeBucket.type === 'custom' ? activeBucket.index : -1) && b.colorKey === k);
+                                const disabled = !isColorAvailable(k, activeBucket);
                                 const toneOpt = presetTone(k, colorScheme);
                                 return (
                                   <Pressable
@@ -456,9 +531,13 @@ export default function EchoScreen() {
                                     }}
                                     style={[
                                       styles.colorChip,
-                                      { backgroundColor: toneOpt.bg, borderColor: toneOpt.border, opacity: disabled ? 0.4 : 1 },
+                                      { backgroundColor: toneOpt.bg, borderColor: toneOpt.border, opacity: disabled ? 0.38 : 1 },
                                     ]}
-                                  />
+                                  >
+                                    {disabled ? (
+                                      <View style={[styles.colorTakenSlash, { backgroundColor: palette.text }]} />
+                                    ) : null}
+                                  </Pressable>
                                 );
                               })}
                             </Pressable>
@@ -468,7 +547,6 @@ export default function EchoScreen() {
 
                       <ThemedText style={{ fontSize: 13, marginTop: 12, marginBottom: 6 }}>Description</ThemedText>
                       <TextInput
-                        editable={isCustom}
                         placeholder="What belongs here?"
                         value={inspectDescription}
                         onChangeText={setInspectDescription}
@@ -478,30 +556,75 @@ export default function EchoScreen() {
                       />
 
                       <View style={styles.modalActions}>
+                        {activeBucket.type === 'custom' ? (
+                          <Pressable
+                            style={({ pressed }) => [
+                              styles.actionBtn,
+                              styles.dangerBtn,
+                              {
+                                borderColor: '#C44E4E',
+                                backgroundColor: palette.surfaceAlt,
+                                opacity: pressed ? 0.7 : 1,
+                              },
+                            ]}
+                            onPress={() => {
+                              Alert.alert(
+                                'Delete bucket?',
+                                `Delete "${inspectName.trim() || activeCustomBucket?.name || 'this bucket'}"?`,
+                                [
+                                  { text: 'Cancel', style: 'cancel' },
+                                  {
+                                    text: 'Delete',
+                                    style: 'destructive',
+                                    onPress: () => {
+                                      deleteCustomBucketDraft(activeBucket.index);
+                                      setInspectOpen(false);
+                                      setActiveBucket(null);
+                                      setInspectName('');
+                                      setInspectDescription('');
+                                      setInspectColorKey(null);
+                                      setInspectColorMenuOpen(false);
+                                    },
+                                  },
+                                ]
+                              );
+                            }}
+                          >
+                            <ThemedText style={{ color: '#C44E4E' }}>Delete</ThemedText>
+                          </Pressable>
+                        ) : null}
                         <Pressable
                           style={({ pressed }) => [styles.actionBtn, { borderColor: palette.border, backgroundColor: palette.surfaceAlt, opacity: pressed ? 0.7 : 1 }]}
                           onPress={() => setInspectOpen(false)}
                         >
                           <ThemedText style={{ color: palette.text }}>Close</ThemedText>
                         </Pressable>
-                        {isCustom ? (
-                          <Pressable
-                            style={({ pressed }) => [styles.actionBtn, { borderColor: palette.border, backgroundColor: palette.surface, opacity: pressed ? 0.7 : 1 }]}
-                            onPress={() => {
-                              if (!inspectName.trim() || !inspectColorKey) return;
-                              if (activeBucket?.type !== 'custom') return;
-                              setCustomBuckets((prev) => prev.map((b, i) => i === activeBucket.index ? { ...b, name: inspectName.trim(), description: inspectDescription.trim(), colorKey: inspectColorKey } : b));
-                              setInspectOpen(false);
-                            }}
-                          >
-                            <ThemedText style={{ color: palette.text }}>Save</ThemedText>
-                          </Pressable>
-                        ) : null}
+                        <Pressable
+                          style={({ pressed }) => [styles.actionBtn, { borderColor: palette.border, backgroundColor: palette.surface, opacity: pressed ? 0.7 : 1 }]}
+                          onPress={() => {
+                            const colorKey = inspectColorKey ?? PRESET_COLOR_KEYS[0];
+                            const nextDraft = {
+                              name: inspectName.trim(),
+                              description: inspectDescription.trim(),
+                              colorKey,
+                            };
+                            if (!nextDraft.name) return;
+                            if (!isColorAvailable(colorKey, activeBucket)) return;
+                            if (activeBucket.type === 'custom') {
+                              updateCustomBucketDraft(activeBucket.index, nextDraft);
+                            } else {
+                              saveBuiltinBucketDraft(activeBucket.name, nextDraft);
+                            }
+                            setInspectOpen(false);
+                          }}
+                        >
+                          <ThemedText style={{ color: palette.text }}>Save</ThemedText>
+                        </Pressable>
                       </View>
                     </>
                   );
                 })()}
-              </Pressable>
+              </View>
             ) : null}
           </View>
         </Modal>
@@ -511,7 +634,7 @@ export default function EchoScreen() {
           </ThemedText>
           <View style={styles.echoStack}>
             {todayEchoes.map((echo, index) => {
-              const tone = bucketTone(echo.bucket, colorScheme);
+              const tone = getBuiltinTone(echo.bucket);
               return (
                 <Pressable
                   key={`${echo.text}-${index}`}
@@ -531,7 +654,7 @@ export default function EchoScreen() {
                     </ThemedText>
                     <View style={[styles.bucketPill, styles.noteBucketPill, { backgroundColor: tone.bg, borderColor: tone.border }]}>
                       <ThemedText style={{ fontSize: 10, lineHeight: 12, color: tone.text }}>
-                        {echo.bucket}
+                        {getBucketDisplayName(echo.bucket)}
                       </ThemedText>
                     </View>
                   </View>
@@ -622,17 +745,11 @@ export default function EchoScreen() {
           <View style={styles.standingRow}>
             {standingMessages.map((message, index) => (
               <Pressable
-                key={`standing-${index}-${message}`}
+                key={message.id}
                 onPress={() =>
                   router.push({
-                    pathname: '/',
-                    params: {
-                      text: message,
-                      noEcho: '1',
-                      standingMode: '1',
-                      standingId: String(index),
-                      returnTo: '/echo',
-                    },
+                    pathname: '/standing/[standingMessageId]',
+                    params: { standingMessageId: message.id },
                   })
                 }
                 style={({ pressed }) => [
@@ -644,14 +761,14 @@ export default function EchoScreen() {
                   },
                 ]}
               >
-                <ThemedText style={{ fontSize: 14 }}>{message}</ThemedText>
+                <ThemedText style={{ fontSize: 14 }}>{message.text}</ThemedText>
               </Pressable>
             ))}
             <Pressable
               onPress={() =>
                 router.push({
-                  pathname: '/',
-                  params: { text: '', noEcho: '1', standingMode: '1', returnTo: '/echo' },
+                  pathname: '/standing/[standingMessageId]',
+                  params: { standingMessageId: 'new' },
                 })
               }
               style={({ pressed }) => [
@@ -666,6 +783,62 @@ export default function EchoScreen() {
             >
               <ThemedText style={{ fontSize: 14, color: palette.muted }}>+ Add message</ThemedText>
             </Pressable>
+          </View>
+        </View>
+
+        <View style={styles.section}>
+          <View
+            style={[
+              styles.syncCard,
+              { backgroundColor: palette.surface, borderColor: palette.border },
+            ]}
+          >
+            <View style={styles.syncCardHeader}>
+              <View style={{ flex: 1, gap: 4 }}>
+                <ThemedText type="subtitle" style={{ fontSize: 18 }}>
+                  GitHub Sync
+                </ThemedText>
+                <ThemedText style={{ color: palette.muted }}>
+                  {syncStatus.lastSyncedAt
+                    ? `Last synced ${new Date(syncStatus.lastSyncedAt).toLocaleString()}`
+                    : syncStatus.pendingReason ?? 'Ready to sync your local vault snapshot.'}
+                </ThemedText>
+                {syncConfig?.repoOwner && syncConfig.repoName ? (
+                  <ThemedText style={{ color: palette.muted, fontSize: 12 }}>
+                    {`${syncConfig.repoOwner}/${syncConfig.repoName} (${syncConfig.repoBranch})`}
+                  </ThemedText>
+                ) : null}
+                {syncStatus.lastError ? (
+                  <ThemedText style={{ color: '#C44E4E', fontSize: 12 }}>
+                    {syncStatus.lastError}
+                  </ThemedText>
+                ) : null}
+              </View>
+
+              <Pressable
+                style={({ pressed }) => [
+                  styles.syncButton,
+                  {
+                    backgroundColor: syncButtonDisabled ? palette.surfaceAlt : palette.accent,
+                    borderColor: syncButtonDisabled ? palette.border : palette.accent,
+                    opacity: pressed ? 0.7 : 1,
+                  },
+                ]}
+                disabled={syncButtonDisabled}
+                onPress={() => {
+                  void syncNow();
+                }}
+              >
+                <ThemedText
+                  style={{
+                    color: syncButtonDisabled ? palette.muted : palette.background,
+                    fontSize: 13,
+                  }}
+                >
+                  {syncStatus.isSyncing ? 'Syncing...' : 'Sync now'}
+                </ThemedText>
+              </Pressable>
+            </View>
           </View>
         </View>
       </ScrollView>
@@ -843,6 +1016,28 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 8,
   },
+  dangerBtn: {
+    marginRight: 'auto',
+  },
+  syncCard: {
+    borderRadius: 18,
+    borderWidth: 1,
+    padding: 14,
+  },
+  syncCardHeader: {
+    flexDirection: 'row',
+    gap: 12,
+    alignItems: 'center',
+  },
+  syncButton: {
+    minWidth: 84,
+    height: 36,
+    paddingHorizontal: 12,
+    borderRadius: 999,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   togglePill: {
     borderWidth: 1,
     borderRadius: 999,
@@ -895,5 +1090,16 @@ const styles = StyleSheet.create({
     height: 28,
     borderRadius: 999,
     borderWidth: 2,
+    overflow: 'hidden',
+    position: 'relative',
+  },
+  colorTakenSlash: {
+    position: 'absolute',
+    top: 12,
+    left: -5,
+    width: 38,
+    height: 3,
+    borderRadius: 999,
+    transform: [{ rotate: '-45deg' }],
   },
 });

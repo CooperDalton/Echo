@@ -1,9 +1,9 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { z } from 'zod';
 
-import { classifyNote } from '../../src/openai';
-import { classifyRequestSchema } from '../_lib/schemas';
+import { shortenWidgetNote } from '../../src/openai';
 import { handleOptions, sendError, sendJson } from '../_lib/http';
+import { shortenWidgetNoteRequestSchema } from '../_lib/schemas';
 
 function errorMessage(error: unknown): string {
   if (error instanceof Error) return error.message;
@@ -25,16 +25,9 @@ export default async function handler(
   }
 
   try {
-    const parsed = classifyRequestSchema.parse(req.body);
-    const result = await classifyNote(parsed.note);
-
-    sendJson(res, 200, {
-      title: result.title,
-      bucket: result.bucket,
-      confidence: result.confidence,
-      method: 'ai',
-      model: result.model,
-    });
+    const parsed = shortenWidgetNoteRequestSchema.parse(req.body);
+    const result = await shortenWidgetNote(parsed.note, parsed.maxLength);
+    sendJson(res, 200, result);
   } catch (error) {
     const status = error instanceof z.ZodError ? 400 : 500;
     sendError(res, status, errorMessage(error));
