@@ -1,8 +1,9 @@
 import * as FileSystem from 'expo-file-system/legacy';
 
-import { BUCKETS, type BucketName } from '@/constants/buckets';
+import type { BucketName } from '@/constants/buckets';
 import {
   CHECK_IN_EMOTIONS,
+  DEFAULT_WIDGET_PREFERENCES,
   EMPTY_NOTES_STATE,
   type BucketDraft,
   type BucketPreferences,
@@ -16,6 +17,7 @@ import {
   type NoteClassificationStatus,
   type NotesState,
   type StandingMessage,
+  type WidgetPreferences,
 } from '@/lib/notes/types';
 import { normalizeEchoSchedule } from '@/lib/widgets/schedule';
 
@@ -37,7 +39,7 @@ interface FrontmatterObject {
 type Frontmatter = Record<string, FrontmatterValue>;
 
 function isBucketName(value: unknown): value is BucketName {
-  return typeof value === 'string' && BUCKETS.includes(value as BucketName);
+  return typeof value === 'string' && value.trim().length > 0;
 }
 
 function isClassificationStatus(value: unknown): value is NoteClassificationStatus {
@@ -370,10 +372,10 @@ async function writeMarkdownFile(path: string, markdown: string): Promise<void> 
 
 async function writeSystemFiles(): Promise<void> {
   await ensureDirectory(SYSTEM_ROOT);
-  await FileSystem.writeAsStringAsync(
-    `${SYSTEM_ROOT}/buckets.yml`,
-    ['buckets:', ...BUCKETS.map((bucket) => `  - ${quoteYaml(bucket)}`), ''].join('\n')
-  );
+  const legacyBucketsFile = `${SYSTEM_ROOT}/buckets.yml`;
+  if (await fileExists(legacyBucketsFile)) {
+    await FileSystem.deleteAsync(legacyBucketsFile, { idempotent: true });
+  }
   await FileSystem.writeAsStringAsync(
     `${SYSTEM_ROOT}/schema.md`,
     [
@@ -439,10 +441,24 @@ function normalizeBucketDraft(value: unknown): BucketDraft | null {
   }
 
   return {
-    name: bucketDraft.name,
-    description: bucketDraft.description,
-    colorKey: bucketDraft.colorKey,
+    name: bucketDraft.name.trim(),
+    description: bucketDraft.description.trim(),
+    colorKey: bucketDraft.colorKey.trim(),
   };
+}
+
+function dedupeBucketDrafts(drafts: BucketDraft[]): BucketDraft[] {
+  const seen = new Set<string>();
+  const result: BucketDraft[] = [];
+
+  drafts.forEach((draft) => {
+    const key = draft.name.trim().toLowerCase();
+    if (!key || seen.has(key)) return;
+    seen.add(key);
+    result.push(draft);
+  });
+
+  return result;
 }
 
 async function loadBucketPreferences(): Promise<BucketPreferences> {
@@ -457,24 +473,19 @@ async function loadBucketPreferences(): Promise<BucketPreferences> {
       return EMPTY_NOTES_STATE.bucketPreferences;
     }
 
-    const builtinsInput =
-      'builtins' in parsed && parsed.builtins && typeof parsed.builtins === 'object'
-        ? (parsed.builtins as Record<string, unknown>)
-        : {};
     const customsInput =
       'customs' in parsed && Array.isArray(parsed.customs) ? parsed.customs : [];
-
-    const builtins = BUCKETS.reduce<BucketPreferences['builtins']>((result, bucket) => {
-      const normalized = normalizeBucketDraft(builtinsInput[bucket]);
-      if (!normalized) return result;
-      return { ...result, [bucket]: normalized };
-    }, {});
+    const legacyBuiltinsInput =
+      'builtins' in parsed && parsed.builtins && typeof parsed.builtins === 'object'
+        ? Object.values(parsed.builtins as Record<string, unknown>)
+        : [];
 
     return {
-      builtins,
-      customs: customsInput
-        .map(normalizeBucketDraft)
-        .filter((bucketDraft): bucketDraft is BucketDraft => bucketDraft !== null),
+      customs: dedupeBucketDrafts(
+        [...customsInput, ...legacyBuiltinsInput]
+          .map(normalizeBucketDraft)
+          .filter((bucketDraft): bucketDraft is BucketDraft => bucketDraft !== null)
+      ),
     };
   } catch {
     return EMPTY_NOTES_STATE.bucketPreferences;
@@ -498,6 +509,22 @@ function normalizeStandingMessage(value: unknown): StandingMessage | null {
     text: standingMessage.text,
     createdAt: standingMessage.createdAt,
     updatedAt: standingMessage.updatedAt,
+  };
+}
+
+function normalizeWidgetPreferences(value: unknown): WidgetPreferences {
+  if (!value || typeof value !== 'object') return DEFAULT_WIDGET_PREFERENCES;
+  const preferences = value as Partial<WidgetPreferences>;
+
+  return {
+    enabled:
+      typeof preferences.enabled === 'boolean'
+        ? preferences.enabled
+        : DEFAULT_WIDGET_PREFERENCES.enabled,
+    includeStandingMessages:
+      typeof preferences.includeStandingMessages === 'boolean'
+        ? preferences.includeStandingMessages
+        : DEFAULT_WIDGET_PREFERENCES.includeStandingMessages,
   };
 }
 
@@ -573,6 +600,7 @@ async function loadLegacyState(): Promise<NotesState> {
       deletedNotes: [],
       bucketPreferences: EMPTY_NOTES_STATE.bucketPreferences,
       standingMessages: [],
+      widgetPreferences: EMPTY_NOTES_STATE.widgetPreferences,
     };
   } catch {
     return EMPTY_NOTES_STATE;
@@ -649,6 +677,9 @@ function normalizeCheckIn(value: unknown): CheckIn | null {
 function normalizeNotesState(value: unknown): NotesState {
   if (!value || typeof value !== 'object') return EMPTY_NOTES_STATE;
   const parsed = value as Partial<NotesState>;
+  const legacyBucketPreferences = parsed.bucketPreferences as
+    | { customs?: unknown; builtins?: unknown }
+    | undefined;
 
   const deletedNotes = Array.isArray(parsed.deletedNotes)
     ? parsed.deletedNotes
@@ -677,14 +708,21 @@ function normalizeNotesState(value: unknown): NotesState {
     reviewed: sortNewestFirst(reviewed),
     checkIns: sortNewestFirst(checkIns),
     deletedNotes: deletedNotes.sort((a, b) => b.deletedAt.localeCompare(a.deletedAt)),
-    bucketPreferences: parsed.bucketPreferences
+    bucketPreferences: legacyBucketPreferences
       ? {
-          builtins: parsed.bucketPreferences.builtins ?? {},
-          customs: Array.isArray(parsed.bucketPreferences.customs)
-            ? parsed.bucketPreferences.customs
-                .map(normalizeBucketDraft)
-                .filter((draft): draft is BucketDraft => draft !== null)
-            : [],
+          customs: dedupeBucketDrafts(
+            [
+              ...(Array.isArray(legacyBucketPreferences.customs)
+                ? legacyBucketPreferences.customs
+                : []),
+              ...(legacyBucketPreferences.builtins &&
+              typeof legacyBucketPreferences.builtins === 'object'
+                ? Object.values(legacyBucketPreferences.builtins)
+                : []),
+            ]
+              .map(normalizeBucketDraft)
+              .filter((draft): draft is BucketDraft => draft !== null)
+          ),
         }
       : EMPTY_NOTES_STATE.bucketPreferences,
     standingMessages: Array.isArray(parsed.standingMessages)
@@ -693,6 +731,7 @@ function normalizeNotesState(value: unknown): NotesState {
           .filter((message): message is StandingMessage => message !== null)
           .sort((a, b) => a.createdAt.localeCompare(b.createdAt))
       : [],
+    widgetPreferences: normalizeWidgetPreferences(parsed.widgetPreferences),
   };
 }
 
@@ -735,7 +774,6 @@ export async function loadNotesState(): Promise<NotesState> {
       checkIns.length > 0 ||
       deletedNotes.length > 0 ||
       bucketPreferences.customs.length > 0 ||
-      Object.keys(bucketPreferences.builtins).length > 0 ||
       standingMessages.length > 0
     ) {
       return {
@@ -745,6 +783,7 @@ export async function loadNotesState(): Promise<NotesState> {
         deletedNotes,
         bucketPreferences,
         standingMessages,
+        widgetPreferences: EMPTY_NOTES_STATE.widgetPreferences,
       };
     }
 

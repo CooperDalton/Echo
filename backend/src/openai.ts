@@ -1,6 +1,6 @@
 import OpenAI from 'openai';
 
-import { BUCKETS, type BucketName, type Note } from './contracts';
+import type { BucketDraft, BucketName, Note } from './contracts';
 import { env } from './config';
 
 const client = new OpenAI({ apiKey: env.OPENAI_API_KEY });
@@ -29,8 +29,22 @@ function normalizeTitle(raw: string): string {
 }
 
 export async function classifyNote(
-  note: Pick<Note, 'id' | 'title' | 'body' | 'createdAt' | 'updatedAt'>
+  note: Pick<Note, 'id' | 'title' | 'body' | 'createdAt' | 'updatedAt'>,
+  buckets: BucketDraft[]
 ): Promise<ClassificationResult> {
+  const availableBuckets = buckets
+    .map((bucket) => ({
+      ...bucket,
+      name: bucket.name.trim(),
+      description: bucket.description.trim(),
+    }))
+    .filter((bucket) => bucket.name.length > 0);
+  const bucketNames = availableBuckets.map((bucket) => bucket.name);
+
+  if (bucketNames.length === 0) {
+    throw new Error('No buckets are configured.');
+  }
+
   const response = await client.responses.create({
     model: env.ECHO_OPENAI_MODEL,
     reasoning: { effort: 'low' },
@@ -49,7 +63,7 @@ export async function classifyNote(
             },
             bucket: {
               type: 'string',
-              enum: [...BUCKETS],
+              enum: bucketNames,
             },
             confidence: {
               type: 'number',
@@ -76,7 +90,13 @@ export async function classifyNote(
               'Use 2 to 5 words when possible.',
               'Hard cap: 26 characters including spaces.',
               'Do not add quotation marks or trailing punctuation.',
-              `Allowed buckets: ${BUCKETS.join(', ')}.`,
+              `Allowed buckets: ${availableBuckets
+                .map((bucket) =>
+                  bucket.description
+                    ? `${bucket.name}: ${bucket.description}`
+                    : bucket.name
+                )
+                .join('\n')}`,
               'Return JSON only, following the schema exactly.',
               'Use the note title and body to choose the best bucket.',
             ].join('\n'),
@@ -100,7 +120,7 @@ export async function classifyNote(
   }
 
   const parsed = JSON.parse(response.output_text) as ClassificationPayload;
-  if (!BUCKETS.includes(parsed.bucket)) {
+  if (!bucketNames.includes(parsed.bucket)) {
     throw new Error('OpenAI returned an invalid bucket.');
   }
   const title = normalizeTitle(parsed.title);

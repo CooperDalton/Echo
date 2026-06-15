@@ -1,4 +1,4 @@
-import type { CheckIn, DeletedNote, Note, NotesState } from '@/lib/notes/types';
+import type { BucketDraft, CheckIn, DeletedNote, Note, NotesState } from '@/lib/notes/types';
 import { classifyNoteRemotely, shortenWidgetNoteRemotely, syncRemoteSnapshot } from '@/lib/sync/client';
 import { isSyncConfigured, loadSyncConfig } from '@/lib/sync/config';
 import type { RemoteNoteClassification, RemoteWidgetShortening, SyncResult } from '@/lib/sync/types';
@@ -76,12 +76,9 @@ function mergeBucketPreferences(
   local: NotesState['bucketPreferences'],
   remote: NotesState['bucketPreferences']
 ): NotesState['bucketPreferences'] {
+  void remote;
   return {
-    builtins: {
-      ...remote.builtins,
-      ...local.builtins,
-    },
-    customs: local.customs.length > 0 ? local.customs : remote.customs,
+    customs: local.customs,
   };
 }
 
@@ -107,14 +104,16 @@ function mergeSyncedState(localState: NotesState, remoteResult: SyncResult): Not
       localState.standingMessages.length > 0
         ? localState.standingMessages
         : remoteResult.state.standingMessages,
+    widgetPreferences: localState.widgetPreferences,
   };
 }
 
 export async function classifyNoteViaBackend(
-  note: Pick<Note, 'id' | 'title' | 'body' | 'createdAt' | 'updatedAt'>
+  note: Pick<Note, 'id' | 'title' | 'body' | 'createdAt' | 'updatedAt'>,
+  buckets: BucketDraft[]
 ): Promise<RemoteNoteClassification | null> {
   const config = await loadSyncConfig();
-  return classifyNoteRemotely(config, note);
+  return classifyNoteRemotely(config, note, buckets);
 }
 
 export async function runSupabaseSync(state: NotesState): Promise<SyncResult> {

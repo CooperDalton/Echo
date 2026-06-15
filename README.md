@@ -57,7 +57,14 @@ Request:
     "body": "The actual note body goes here.",
     "createdAt": "2026-04-29T14:32:45-07:00",
     "updatedAt": "2026-04-29T14:32:45-07:00"
-  }
+  },
+  "buckets": [
+    {
+      "name": "Research",
+      "description": "Ideas and references to revisit.",
+      "colorKey": "sky"
+    }
+  ]
 }
 ```
 
@@ -66,7 +73,7 @@ Response:
 ```json
 {
   "title": "Supabase Note Sync",
-  "bucket": "Systems",
+  "bucket": "Research",
   "confidence": 0.86,
   "method": "ai",
   "model": "gpt-5.4-nano"
@@ -85,7 +92,6 @@ Request:
     "checkIns": [],
     "deletedNotes": [],
     "bucketPreferences": {
-      "builtins": {},
       "customs": []
     },
     "standingMessages": []
@@ -101,7 +107,6 @@ Response:
   "checkIns": [],
   "deletedNotes": [],
   "bucketPreferences": {
-    "builtins": {},
     "customs": []
   },
   "standingMessages": [],

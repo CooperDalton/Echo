@@ -12,7 +12,6 @@ import {
 import { AppState, type AppStateStatus } from 'react-native';
 import * as Notifications from 'expo-notifications';
 
-import type { BucketName } from '@/constants/buckets';
 import { classifyNote } from '@/lib/notes/classify-note';
 import {
   createCheckInFilePath,
@@ -33,6 +32,7 @@ import {
   type Note,
   type NotesState,
   type StandingMessage,
+  type WidgetPreferences,
 } from '@/lib/notes/types';
 import { loadSyncConfig, syncPendingReason } from '@/lib/sync/config';
 import { runSupabaseSync, shortenWidgetNoteViaBackend } from '@/lib/sync/service';
@@ -48,20 +48,22 @@ type NotesContextValue = {
   checkIns: CheckIn[];
   bucketPreferences: BucketPreferences;
   standingMessages: StandingMessage[];
+  widgetPreferences: WidgetPreferences;
   syncConfig: EchoSyncConfig | null;
   syncStatus: SyncStatus;
-  addRecentNote: (body: string) => void;
+  addRecentNote: (body: string, options?: { echoEnabled?: boolean }) => void;
   addCheckIn: (input: AddCheckInInput) => void;
   updateCheckIn: (checkInId: string, input: UpdateCheckInInput) => void;
   markRecentAsReviewed: (noteId: string) => void;
   deleteRecentNote: (noteId: string) => void;
   deleteReviewedNote: (noteId: string) => void;
-  saveBuiltinBucketDraft: (bucketName: BucketName, draft: BucketDraft) => void;
   addCustomBucketDraft: (draft: BucketDraft) => void;
   updateCustomBucketDraft: (index: number, draft: BucketDraft) => void;
   deleteCustomBucketDraft: (index: number) => void;
   upsertStandingMessage: (messageId: string | null, text: string) => void;
   deleteStandingMessage: (messageId: string) => void;
+  setWidgetEnabled: (enabled: boolean) => void;
+  setWidgetStandingMessagesEnabled: (enabled: boolean) => void;
   syncNow: () => Promise<void>;
 };
 
@@ -119,9 +121,14 @@ async function notifySyncFailure(message: string): Promise<void> {
   }
 }
 
-function createNote(body: string, existingNotes: Note[]): Note {
+function createNote(
+  body: string,
+  existingNotes: Note[],
+  options: { echoEnabled: boolean }
+): Note {
   const createdAt = new Date().toISOString();
   const id = `note-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  const echo = createEchoScheduleForNote(id, createdAt, existingNotes);
   const note: Note = {
     id,
     title: createNoteTitle(body),
@@ -129,11 +136,14 @@ function createNote(body: string, existingNotes: Note[]): Note {
     createdAt,
     updatedAt: createdAt,
     bucket: null,
-    classificationStatus: 'pending',
+    classificationStatus: options.echoEnabled ? 'classified' : 'pending',
     classificationMethod: 'unknown',
     classificationConfidence: null,
     widgetText: body.replace(/\s+/g, ' ').trim().length <= WIDGET_TEXT_LIMIT ? body : null,
-    echo: createEchoScheduleForNote(id, createdAt, existingNotes),
+    echo: {
+      ...echo,
+      enabled: options.echoEnabled,
+    },
     filePath: null,
   };
 
@@ -366,7 +376,10 @@ export function NotesProvider({ children }: { children: ReactNode }) {
 
   const queueClassification = useCallback((noteSnapshot: Note) => {
     const { id: noteId } = noteSnapshot;
+    if (noteSnapshot.echo.enabled) return;
     if (inFlightClassifications.current.has(noteId)) return;
+    const buckets = stateRef.current.bucketPreferences.customs;
+    if (buckets.length === 0) return;
     inFlightClassifications.current.add(noteId);
 
     commitState((prev) =>
@@ -378,7 +391,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
 
     void (async () => {
       try {
-        const result = await classifyNote(noteSnapshot);
+        const result = await classifyNote(noteSnapshot, buckets);
         commitState((prev) =>
           updateNoteInState(prev, noteId, (note) => {
             if (note.bucket) return note;
@@ -447,26 +460,32 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     if (!hydrated) return;
 
     const pending = [...state.recent, ...state.reviewed].filter(
-      (note) => note.bucket === null && note.classificationStatus !== 'failed'
+      (note) => !note.echo.enabled && note.bucket === null && note.classificationStatus === 'pending'
     );
 
-    pending.forEach((note) => {
-      queueClassification(note);
-    });
+    if (state.bucketPreferences.customs.length > 0) {
+      pending.forEach((note) => {
+        queueClassification(note);
+      });
+    }
 
     [...state.recent, ...state.reviewed].forEach((note) => {
       queueWidgetShortening(note);
     });
-  }, [hydrated, state.recent, state.reviewed, queueClassification, queueWidgetShortening]);
+  }, [hydrated, state.recent, state.reviewed, state.bucketPreferences.customs, queueClassification, queueWidgetShortening]);
 
   const addRecentNote = useCallback(
-    (body: string) => {
+    (body: string, options?: { echoEnabled?: boolean }) => {
       const trimmed = body.trim();
       if (!trimmed) return;
 
-      const note = createNote(trimmed, [...stateRef.current.recent, ...stateRef.current.reviewed]);
+      const note = createNote(trimmed, [...stateRef.current.recent, ...stateRef.current.reviewed], {
+        echoEnabled: options?.echoEnabled ?? false,
+      });
       commitState((prev) => ({ ...prev, recent: [note, ...prev.recent] }));
-      queueClassification(note);
+      if (!note.echo.enabled) {
+        queueClassification(note);
+      }
       queueWidgetShortening(note);
       markDirtyAndScheduleSync();
     },
@@ -550,20 +569,6 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     markDirtyAndScheduleSync();
   }, [commitState, markDirtyAndScheduleSync]);
 
-  const saveBuiltinBucketDraft = useCallback((bucketName: BucketName, draft: BucketDraft) => {
-    commitState((prev) => ({
-      ...prev,
-      bucketPreferences: {
-        ...prev.bucketPreferences,
-        builtins: {
-          ...prev.bucketPreferences.builtins,
-          [bucketName]: draft,
-        },
-      },
-    }));
-    markDirtyAndScheduleSync();
-  }, [commitState, markDirtyAndScheduleSync]);
-
   const addCustomBucketDraft = useCallback((draft: BucketDraft) => {
     commitState((prev) => ({
       ...prev,
@@ -576,26 +581,51 @@ export function NotesProvider({ children }: { children: ReactNode }) {
   }, [commitState, markDirtyAndScheduleSync]);
 
   const updateCustomBucketDraft = useCallback((index: number, draft: BucketDraft) => {
-    commitState((prev) => ({
-      ...prev,
-      bucketPreferences: {
-        ...prev.bucketPreferences,
-        customs: prev.bucketPreferences.customs.map((bucket, currentIndex) =>
-          currentIndex === index ? draft : bucket
-        ),
-      },
-    }));
+    commitState((prev) => {
+      const existing = prev.bucketPreferences.customs[index];
+      const oldName = existing?.name;
+      const renameNote = (note: Note) =>
+        oldName && note.bucket === oldName ? { ...note, bucket: draft.name } : note;
+
+      return {
+        ...prev,
+        recent: prev.recent.map(renameNote),
+        reviewed: prev.reviewed.map(renameNote),
+        bucketPreferences: {
+          ...prev.bucketPreferences,
+          customs: prev.bucketPreferences.customs.map((bucket, currentIndex) =>
+            currentIndex === index ? draft : bucket
+          ),
+        },
+      };
+    });
     markDirtyAndScheduleSync();
   }, [commitState, markDirtyAndScheduleSync]);
 
   const deleteCustomBucketDraft = useCallback((index: number) => {
-    commitState((prev) => ({
-      ...prev,
-      bucketPreferences: {
-        ...prev.bucketPreferences,
-        customs: prev.bucketPreferences.customs.filter((_, currentIndex) => currentIndex !== index),
-      },
-    }));
+    commitState((prev) => {
+      const deletedName = prev.bucketPreferences.customs[index]?.name;
+      const clearBucket = (note: Note) =>
+        deletedName && note.bucket === deletedName
+          ? {
+              ...note,
+              bucket: null,
+              classificationStatus: 'pending' as const,
+              classificationMethod: 'unknown' as const,
+              classificationConfidence: null,
+            }
+          : note;
+
+      return {
+        ...prev,
+        recent: prev.recent.map(clearBucket),
+        reviewed: prev.reviewed.map(clearBucket),
+        bucketPreferences: {
+          ...prev.bucketPreferences,
+          customs: prev.bucketPreferences.customs.filter((_, currentIndex) => currentIndex !== index),
+        },
+      };
+    });
     markDirtyAndScheduleSync();
   }, [commitState, markDirtyAndScheduleSync]);
 
@@ -643,6 +673,26 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     markDirtyAndScheduleSync();
   }, [commitState, markDirtyAndScheduleSync]);
 
+  const setWidgetEnabled = useCallback((enabled: boolean) => {
+    commitState((prev) => ({
+      ...prev,
+      widgetPreferences: {
+        ...prev.widgetPreferences,
+        enabled,
+      },
+    }));
+  }, [commitState]);
+
+  const setWidgetStandingMessagesEnabled = useCallback((enabled: boolean) => {
+    commitState((prev) => ({
+      ...prev,
+      widgetPreferences: {
+        ...prev.widgetPreferences,
+        includeStandingMessages: enabled,
+      },
+    }));
+  }, [commitState]);
+
   const syncNow = useCallback(async () => {
     await performSync('manual');
   }, [performSync]);
@@ -688,6 +738,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       checkIns: state.checkIns,
       bucketPreferences: state.bucketPreferences,
       standingMessages: state.standingMessages,
+      widgetPreferences: state.widgetPreferences,
       syncConfig,
       syncStatus,
       addRecentNote,
@@ -696,12 +747,13 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       markRecentAsReviewed,
       deleteRecentNote,
       deleteReviewedNote,
-      saveBuiltinBucketDraft,
       addCustomBucketDraft,
       updateCustomBucketDraft,
       deleteCustomBucketDraft,
       upsertStandingMessage,
       deleteStandingMessage,
+      setWidgetEnabled,
+      setWidgetStandingMessagesEnabled,
       syncNow,
     }),
     [
@@ -711,6 +763,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       state.checkIns,
       state.bucketPreferences,
       state.standingMessages,
+      state.widgetPreferences,
       syncConfig,
       syncStatus,
       addRecentNote,
@@ -719,12 +772,13 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       markRecentAsReviewed,
       deleteRecentNote,
       deleteReviewedNote,
-      saveBuiltinBucketDraft,
       addCustomBucketDraft,
       updateCustomBucketDraft,
       deleteCustomBucketDraft,
       upsertStandingMessage,
       deleteStandingMessage,
+      setWidgetEnabled,
+      setWidgetStandingMessagesEnabled,
       syncNow,
     ]
   );

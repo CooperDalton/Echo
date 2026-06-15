@@ -1,4 +1,3 @@
-import type { BucketName } from '@/constants/buckets';
 import type { CheckIn, DeletedNote, Note, NotesState } from '@/lib/notes/types';
 
 export type EchoSyncConfig = {
@@ -10,7 +9,7 @@ export type EchoSyncConfig = {
 
 export type RemoteNoteClassification = {
   title: string;
-  bucket: BucketName;
+  bucket: string;
   confidence: number | null;
   method: 'ai';
   model: string | null;

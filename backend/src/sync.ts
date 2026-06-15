@@ -48,7 +48,6 @@ type DeletedNoteRow = {
 
 type BucketPreferencesRow = {
   id: 'default';
-  builtins: BucketPreferences['builtins'];
   customs: BucketPreferences['customs'];
 };
 
@@ -125,12 +124,9 @@ function mergeBucketPreferences(
   local: BucketPreferences,
   remote: BucketPreferences
 ): BucketPreferences {
+  void remote;
   return {
-    builtins: {
-      ...remote.builtins,
-      ...local.builtins,
-    },
-    customs: local.customs.length > 0 ? local.customs : remote.customs,
+    customs: local.customs,
   };
 }
 
@@ -261,7 +257,6 @@ async function loadSupabaseSnapshot(): Promise<NotesState> {
     checkIns: sortNewestFirst(checkInRows.map(checkInFromRow)),
     deletedNotes,
     bucketPreferences: {
-      builtins: bucketPreferencesRow?.builtins ?? {},
       customs: bucketPreferencesRow?.customs ?? [],
     },
     standingMessages: ((standingMessageRows.data ?? []) as StandingMessageRow[]).map(
@@ -299,7 +294,6 @@ async function persistSupabaseSnapshot(state: NotesState, deviceId: string): Pro
   const { error: bucketPreferencesError } = await supabase.from('bucket_preferences').upsert(
     {
       id: 'default',
-      builtins: state.bucketPreferences.builtins,
       customs: state.bucketPreferences.customs,
     },
     { onConflict: 'id' }

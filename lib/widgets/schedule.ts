@@ -49,7 +49,7 @@ function intervalForRange(seed: number, index: number, range: [number, number]):
 function occupancyFromNotes(notes: Note[], ignoredNoteId?: string): Map<string, number> {
   const map = new Map<string, number>();
   notes.forEach((note) => {
-    if (note.id === ignoredNoteId || !note.echo.enabled) return;
+    if (note.id === ignoredNoteId || !note.echo.enabled || note.bucket !== null) return;
     note.echo.scheduledDates.forEach((scheduledDate) => {
       map.set(scheduledDate, (map.get(scheduledDate) ?? 0) + 1);
     });
@@ -122,4 +122,3 @@ export function normalizeEchoSchedule(
 export function todayKey(): string {
   return dateKey(new Date());
 }
-

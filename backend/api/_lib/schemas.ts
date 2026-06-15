@@ -1,8 +1,6 @@
 import { z } from 'zod';
 
-import { BUCKETS, CHECK_IN_EMOTIONS, type BucketDraft, type BucketPreferences, type CheckIn, type DeletedNote, type Note, type StandingMessage } from '../../src/contracts';
-
-const bucketSchema = z.enum(BUCKETS);
+import { CHECK_IN_EMOTIONS, type BucketDraft, type BucketPreferences, type CheckIn, type DeletedNote, type Note, type StandingMessage } from '../../src/contracts';
 
 export const noteSchema = z.object({
   id: z.string().min(1),
@@ -10,7 +8,7 @@ export const noteSchema = z.object({
   body: z.string(),
   createdAt: z.string().min(1),
   updatedAt: z.string().min(1),
-  bucket: bucketSchema.nullable(),
+  bucket: z.string().min(1).nullable(),
   classificationStatus: z.enum(['pending', 'classified', 'failed']),
   classificationMethod: z.enum(['ai', 'keyword', 'unknown']),
   classificationConfidence: z.number().nullable(),
@@ -64,12 +62,6 @@ export const bucketDraftSchema = z.object({
 }) satisfies z.ZodType<BucketDraft>;
 
 export const bucketPreferencesSchema = z.object({
-  builtins: z.object(
-    Object.fromEntries(BUCKETS.map((bucket) => [bucket, bucketDraftSchema.optional()])) as Record<
-      (typeof BUCKETS)[number],
-      z.ZodOptional<typeof bucketDraftSchema>
-    >
-  ).default({}),
   customs: z.array(bucketDraftSchema).default([]),
 }) satisfies z.ZodType<BucketPreferences>;
 
@@ -87,6 +79,7 @@ export const classifyRequestSchema = z.object({
     createdAt: true,
     updatedAt: true,
   }),
+  buckets: z.array(bucketDraftSchema).default([]),
 });
 
 export const shortenWidgetNoteRequestSchema = z.object({
@@ -104,7 +97,7 @@ export const syncRequestSchema = z.object({
     notes: z.array(noteSchema),
     checkIns: z.array(checkInSchema),
     deletedNotes: z.array(deletedNoteSchema).default([]),
-    bucketPreferences: bucketPreferencesSchema.default({ builtins: {}, customs: [] }),
+    bucketPreferences: bucketPreferencesSchema.default({ customs: [] }),
     standingMessages: z.array(standingMessageSchema).default([]),
   }),
 });

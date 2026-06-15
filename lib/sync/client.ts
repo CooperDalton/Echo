@@ -1,5 +1,4 @@
-import type { BucketName } from '@/constants/buckets';
-import type { CheckIn, DeletedNote, Note, NotesState } from '@/lib/notes/types';
+import type { BucketDraft, CheckIn, DeletedNote, Note, NotesState } from '@/lib/notes/types';
 import type {
   EchoSyncConfig,
   RemoteNoteClassification,
@@ -35,7 +34,7 @@ type SyncResponseBody = {
 
 type ClassifyResponseBody = {
   title?: string;
-  bucket?: BucketName;
+  bucket?: string;
   confidence?: number | null;
   method?: 'ai';
   model?: string | null;
@@ -43,6 +42,7 @@ type ClassifyResponseBody = {
 
 type ClassifyRequestBody = {
   note: Pick<Note, 'id' | 'title' | 'body' | 'createdAt' | 'updatedAt'>;
+  buckets: BucketDraft[];
 };
 
 type ShortenWidgetNoteResponseBody = {
@@ -100,6 +100,7 @@ export async function syncRemoteSnapshot(
       deletedNotes: response.deletedNotes ?? payload.snapshot.deletedNotes,
       bucketPreferences: response.bucketPreferences ?? payload.snapshot.bucketPreferences,
       standingMessages: response.standingMessages ?? payload.snapshot.standingMessages,
+      widgetPreferences: state.widgetPreferences,
     },
     syncedAt: response.syncedAt ?? new Date().toISOString(),
     summary: {
@@ -136,18 +137,21 @@ export async function shortenWidgetNoteRemotely(
 
 export async function classifyNoteRemotely(
   config: EchoSyncConfig,
-  note: Pick<Note, 'id' | 'title' | 'body' | 'createdAt' | 'updatedAt'>
+  note: Pick<Note, 'id' | 'title' | 'body' | 'createdAt' | 'updatedAt'>,
+  buckets: BucketDraft[]
 ): Promise<RemoteNoteClassification | null> {
   if (!config.apiBaseUrl || !config.aiCategorizationEnabled) return null;
+  if (buckets.length === 0) return null;
 
   const url = `${normalizeBaseUrl(config.apiBaseUrl)}/api/mobile/classify-note`;
   const requestBody: ClassifyRequestBody = {
     note,
+    buckets,
   };
 
   const response = await postJson<ClassifyResponseBody>(url, requestBody);
 
-  if (!response.bucket) return null;
+  if (!response.bucket || !buckets.some((bucket) => bucket.name === response.bucket)) return null;
   if (typeof response.title !== 'string' || response.title.trim().length === 0) return null;
 
   return {

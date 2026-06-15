@@ -116,7 +116,7 @@ export default function CaptureScreen() {
     router.replace(returnPath);
   }, [goBack, hasStandingId, parsedStandingId, returnPath, router]);
 
-  const submitNote = useCallback(() => {
+  const submitNote = useCallback((echoEnabled: boolean) => {
     const trimmed = text.trim();
     if (trimmed.length === 0) {
       goBack();
@@ -125,7 +125,7 @@ export default function CaptureScreen() {
 
     // Existing note opens are currently read-only in Capture.
     if (!hasExistingNoteId) {
-      addRecentNote(trimmed);
+      addRecentNote(trimmed, { echoEnabled });
     }
 
     goBack();
@@ -169,7 +169,7 @@ export default function CaptureScreen() {
                   { backgroundColor: palette.accent, opacity: pressed || !submitEnabled ? 0.7 : 1 },
                 ]}
                 disabled={!submitEnabled}
-                onPress={submitNote}>
+                onPress={() => submitNote(true)}>
                 <ThemedText style={{ color: palette.background, fontSize: 15 }}>Echo</ThemedText>
               </Pressable>
             ) : null}
@@ -204,7 +204,7 @@ export default function CaptureScreen() {
                   saveStandingMessage();
                   return;
                 }
-                submitNote();
+                submitNote(false);
               }}>
               <IconSymbol name="checkmark" size={20} color={palette.text} />
             </Pressable>

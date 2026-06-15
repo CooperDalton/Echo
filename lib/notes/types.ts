@@ -45,6 +45,16 @@ export type WidgetEntry = {
   standingMessageId?: string;
 };
 
+export type WidgetPreferences = {
+  enabled: boolean;
+  includeStandingMessages: boolean;
+};
+
+export const DEFAULT_WIDGET_PREFERENCES: WidgetPreferences = {
+  enabled: true,
+  includeStandingMessages: true,
+};
+
 export type DeletedNote = {
   id: string;
   filePath: string | null;
@@ -58,7 +68,6 @@ export type BucketDraft = {
 };
 
 export type BucketPreferences = {
-  builtins: Partial<Record<BucketName, BucketDraft>>;
   customs: BucketDraft[];
 };
 
@@ -95,6 +104,7 @@ export type NotesState = {
   deletedNotes: DeletedNote[];
   bucketPreferences: BucketPreferences;
   standingMessages: StandingMessage[];
+  widgetPreferences: WidgetPreferences;
 };
 
 export const EMPTY_NOTES_STATE: NotesState = {
@@ -103,8 +113,8 @@ export const EMPTY_NOTES_STATE: NotesState = {
   checkIns: [],
   deletedNotes: [],
   bucketPreferences: {
-    builtins: {},
     customs: [],
   },
   standingMessages: [],
+  widgetPreferences: DEFAULT_WIDGET_PREFERENCES,
 };

@@ -28,10 +28,7 @@ create table if not exists public.notes (
   body text not null default '',
   created_at timestamptz not null,
   updated_at timestamptz not null,
-  bucket text check (
-    bucket is null
-    or bucket in ('Business Ideas', 'Reflections', 'Game Dev', 'Family', 'Systems')
-  ),
+  bucket text,
   classification_status text not null default 'pending' check (
     classification_status in ('pending', 'classified', 'failed')
   ),
@@ -48,6 +45,8 @@ create table if not exists public.notes (
   inserted_at timestamptz not null default now(),
   stored_at timestamptz not null default now()
 );
+
+alter table public.notes drop constraint if exists notes_bucket_check;
 
 create index if not exists notes_created_at_idx on public.notes (created_at desc);
 create index if not exists notes_updated_at_idx on public.notes (updated_at desc);
@@ -89,11 +88,12 @@ create index if not exists deleted_notes_deleted_at_idx on public.deleted_notes 
 
 create table if not exists public.bucket_preferences (
   id text primary key default 'default' check (id = 'default'),
-  builtins jsonb not null default '{}'::jsonb,
   customs jsonb not null default '[]'::jsonb,
   inserted_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
+
+alter table public.bucket_preferences drop column if exists builtins;
 
 drop trigger if exists set_bucket_preferences_updated_at on public.bucket_preferences;
 create trigger set_bucket_preferences_updated_at
@@ -129,6 +129,6 @@ alter table public.bucket_preferences enable row level security;
 alter table public.standing_messages enable row level security;
 alter table public.sync_devices enable row level security;
 
-insert into public.bucket_preferences (id, builtins, customs)
-values ('default', '{}'::jsonb, '[]'::jsonb)
+insert into public.bucket_preferences (id, customs)
+values ('default', '[]'::jsonb)
 on conflict (id) do nothing;

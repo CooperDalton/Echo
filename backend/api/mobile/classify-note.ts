@@ -26,7 +26,7 @@ export default async function handler(
 
   try {
     const parsed = classifyRequestSchema.parse(req.body);
-    const result = await classifyNote(parsed.note);
+    const result = await classifyNote(parsed.note, parsed.buckets);
 
     sendJson(res, 200, {
       title: result.title,

@@ -1,12 +1,4 @@
-export const BUCKETS = [
-  'Business Ideas',
-  'Reflections',
-  'Game Dev',
-  'Family',
-  'Systems',
-] as const;
-
-export type BucketName = (typeof BUCKETS)[number];
+export type BucketName = string;
 
 export type NoteClassificationStatus = 'pending' | 'classified' | 'failed';
 export type NoteClassificationMethod = 'ai' | 'keyword' | 'unknown';
@@ -57,7 +49,6 @@ export type BucketDraft = {
 };
 
 export type BucketPreferences = {
-  builtins: Partial<Record<BucketName, BucketDraft>>;
   customs: BucketDraft[];
 };
 

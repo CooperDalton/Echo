@@ -16,18 +16,45 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { useNotes } from '@/context/notes-context';
-import { BUCKET_COLORS, BUCKETS, type BucketName } from '@/constants/buckets';
+import type { BucketName } from '@/constants/buckets';
 import { Colors } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
-import type { Note } from '@/lib/notes/types';
+import type { BucketDraft, Note } from '@/lib/notes/types';
 
 type BucketFilter = BucketName | 'All' | 'Unbucketed';
 
-function bucketTone(bucket: BucketName, colorScheme: 'light' | 'dark') {
-  const color = BUCKET_COLORS[bucket];
+const PRESET_COLORS = {
+  mint: { lightBg: '#E8F6EC', lightBorder: '#B8E1C4', lightText: '#1E6B3C', darkBg: '#223629', darkBorder: '#32543E', darkText: '#A9E3BC' },
+  sky: { lightBg: '#EAF6FF', lightBorder: '#C7E7FF', lightText: '#1F5F8A', darkBg: '#1E3446', darkBorder: '#2D516A', darkText: '#A9D8FF' },
+  purple: { lightBg: '#F1EAFE', lightBorder: '#D8C8FA', lightText: '#5E35A8', darkBg: '#2F2340', darkBorder: '#4A3770', darkText: '#D4C4F7' },
+  orange: { lightBg: '#FFF4E6', lightBorder: '#F7D6B3', lightText: '#8A4B1F', darkBg: '#3A281B', darkBorder: '#5A3D2A', darkText: '#F2C9A1' },
+  teal: { lightBg: '#E7F6F5', lightBorder: '#B7E2DF', lightText: '#1F5F5A', darkBg: '#1F3735', darkBorder: '#2E5551', darkText: '#A8E2DD' },
+  pink: { lightBg: '#FFEAF3', lightBorder: '#F8C7DA', lightText: '#8A2757', darkBg: '#3C2432', darkBorder: '#5D364B', darkText: '#F3B8CF' },
+  gold: { lightBg: '#FFF7E6', lightBorder: '#F3E0B5', lightText: '#7A5A1E', darkBg: '#3A301D', darkBorder: '#5A4A2D', darkText: '#EED59A' },
+  indigo: { lightBg: '#EAEFFD', lightBorder: '#C6D0FA', lightText: '#2B3F8C', darkBg: '#202845', darkBorder: '#303D6E', darkText: '#B8C3F3' },
+  red: { lightBg: '#FDEAEA', lightBorder: '#F7C4C4', lightText: '#8C2B2B', darkBg: '#402020', darkBorder: '#6B3030', darkText: '#F3B8B8' },
+  slate: { lightBg: '#EEF1F5', lightBorder: '#D3DAE5', lightText: '#2E3A4A', darkBg: '#232A36', darkBorder: '#38475C', darkText: '#C5D0E3' },
+  lime: { lightBg: '#F3FBE6', lightBorder: '#D8EDB0', lightText: '#48681A', darkBg: '#2A3521', darkBorder: '#3D5130', darkText: '#D3E8A6' },
+  brown: { lightBg: '#F7EEE8', lightBorder: '#E3CDC0', lightText: '#6E3C26', darkBg: '#3A2920', darkBorder: '#5A3D30', darkText: '#E6CBB9' },
+} as const;
+
+type PresetKey = keyof typeof PRESET_COLORS;
+const PRESET_COLOR_KEYS = Object.keys(PRESET_COLORS) as PresetKey[];
+
+function normalizePresetKey(value: string): PresetKey {
+  return PRESET_COLOR_KEYS.includes(value as PresetKey) ? (value as PresetKey) : PRESET_COLOR_KEYS[0];
+}
+
+function presetTone(colorKey: string, colorScheme: 'light' | 'dark') {
+  const color = PRESET_COLORS[normalizePresetKey(colorKey)];
   return colorScheme === 'dark'
     ? { bg: color.darkBg, border: color.darkBorder, text: color.darkText }
     : { bg: color.lightBg, border: color.lightBorder, text: color.lightText };
+}
+
+function bucketTone(bucketName: BucketName, buckets: BucketDraft[], colorScheme: 'light' | 'dark') {
+  const bucket = buckets.find((item) => item.name === bucketName);
+  return bucket ? presetTone(bucket.colorKey, colorScheme) : uncategorizedTone(colorScheme);
 }
 
 function uncategorizedTone(colorScheme: 'light' | 'dark') {
@@ -46,6 +73,10 @@ function noteMatchesBucket(note: Note, selectedBucket: BucketFilter): boolean {
   if (selectedBucket === 'All') return true;
   if (selectedBucket === 'Unbucketed') return note.bucket === null;
   return note.bucket === selectedBucket;
+}
+
+function isLibraryNote(note: Note): boolean {
+  return !(note.echo.enabled && note.bucket === null);
 }
 
 function noteBucketLabel(note: Note): string {
@@ -73,10 +104,12 @@ export default function LibraryScreen() {
     hydrated,
     recent,
     reviewed,
+    bucketPreferences,
     markRecentAsReviewed,
     deleteRecentNote,
     deleteReviewedNote,
   } = useNotes();
+  const customBuckets = bucketPreferences.customs;
 
   const [searchQuery, setSearchQuery] = useState('');
   const [bucketOpen, setBucketOpen] = useState(false);
@@ -89,11 +122,13 @@ export default function LibraryScreen() {
   const selectedTone = useMemo(() => {
     if (selectedBucket === 'All') return null;
     if (selectedBucket === 'Unbucketed') return neutralTone;
-    return bucketTone(selectedBucket, colorScheme);
-  }, [selectedBucket, colorScheme, neutralTone]);
+    return bucketTone(selectedBucket, customBuckets, colorScheme);
+  }, [selectedBucket, customBuckets, colorScheme, neutralTone]);
 
   const filteredRecent = useMemo(() => {
-    const bucketFiltered = recent.filter((note) => noteMatchesBucket(note, selectedBucket));
+    const bucketFiltered = recent.filter(
+      (note) => isLibraryNote(note) && noteMatchesBucket(note, selectedBucket)
+    );
     if (!trimmedQuery) return bucketFiltered;
 
     return bucketFiltered.filter((note) =>
@@ -104,7 +139,9 @@ export default function LibraryScreen() {
   }, [recent, selectedBucket, trimmedQuery]);
 
   const filteredReviewed = useMemo(() => {
-    const bucketFiltered = reviewed.filter((note) => noteMatchesBucket(note, selectedBucket));
+    const bucketFiltered = reviewed.filter(
+      (note) => isLibraryNote(note) && noteMatchesBucket(note, selectedBucket)
+    );
     if (!trimmedQuery) return bucketFiltered;
 
     return bucketFiltered.filter((note) =>
@@ -127,7 +164,7 @@ export default function LibraryScreen() {
   }
 
   function renderBucketPill(note: Note) {
-    const tone = note.bucket ? bucketTone(note.bucket, colorScheme) : neutralTone;
+    const tone = note.bucket ? bucketTone(note.bucket, customBuckets, colorScheme) : neutralTone;
 
     return (
       <View
@@ -230,11 +267,11 @@ export default function LibraryScreen() {
                     <ThemedText style={{ color: palette.text, fontSize: 13 }}>All</ThemedText>
                   </Pressable>
 
-                  {BUCKETS.map((bucket) => {
-                    const tone = bucketTone(bucket, colorScheme);
+                  {customBuckets.map((bucket) => {
+                    const tone = presetTone(bucket.colorKey, colorScheme);
                     return (
                       <Pressable
-                        key={bucket}
+                        key={bucket.name}
                         style={({ pressed }) => [
                           styles.bucketOption,
                           {
@@ -244,12 +281,12 @@ export default function LibraryScreen() {
                           },
                         ]}
                         onPress={() => {
-                          setSelectedBucket(bucket);
+                          setSelectedBucket(bucket.name);
                           setBucketOpen(false);
                         }}
                       >
                         <ThemedText style={{ color: tone.text, fontSize: 13 }}>
-                          {bucket}
+                          {bucket.name}
                         </ThemedText>
                       </Pressable>
                     );
@@ -284,7 +321,9 @@ export default function LibraryScreen() {
             </ThemedText>
             <View style={styles.noteStack}>
               {filteredRecent.map((note) => {
-                const reviewedTone = bucketTone('Business Ideas', colorScheme);
+                const reviewedTone = colorScheme === 'dark'
+                  ? { bg: '#20352A', border: '#33583F', text: '#B9E8C7' }
+                  : { bg: '#E8F6EC', border: '#B8E1C4', text: '#1E6B3C' };
                 const size = rowSizes[note.id];
                 const actionWidth = size?.width ?? Dimensions.get('window').width;
                 const actionHeight = size?.height;
