@@ -1,4 +1,14 @@
-import { Alert, Pressable, ScrollView, StyleSheet, View, Modal, TextInput } from 'react-native';
+import {
+  Alert,
+  Animated,
+  type LayoutChangeEvent,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  View,
+  Modal,
+  TextInput,
+} from 'react-native';
 import { GestureHandlerRootView, Swipeable } from 'react-native-gesture-handler';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useState, useCallback, useEffect, useMemo } from 'react';
@@ -101,6 +111,11 @@ function formatNextEchoDate(nextDueAt: string): string {
   });
 }
 
+function formatEchoProgress(note: Note): string {
+  const total = Math.max(note.echo.scheduledDates.length, note.echo.occurrenceCount);
+  return `${note.echo.occurrenceCount}/${total}`;
+}
+
 function notePreview(note: Note): string {
   return note.body.replace(/\s*\n+\s*/g, ' ').replace(/\s+/g, ' ').trim() || note.title;
 }
@@ -146,6 +161,8 @@ export default function EchoScreen() {
   const [inspectDescription, setInspectDescription] = useState('');
   const [inspectColorKey, setInspectColorKey] = useState<PresetKey | null>(null);
   const [inspectColorMenuOpen, setInspectColorMenuOpen] = useState(false);
+  const [queueRowSizes, setQueueRowSizes] = useState<Record<string, { width: number; height: number }>>({});
+  const [standingRowSizes, setStandingRowSizes] = useState<Record<string, { width: number; height: number }>>({});
 
   const customBuckets = bucketPreferences.customs;
 
@@ -250,7 +267,10 @@ export default function EchoScreen() {
         deletedNotes: [],
         bucketPreferences,
         standingMessages,
-        widgetPreferences,
+        widgetPreferences: {
+          ...widgetPreferences,
+          enabled: true,
+        },
       }),
     [bucketPreferences, recent, reviewed, standingMessages, widgetPreferences]
   );
@@ -291,6 +311,30 @@ export default function EchoScreen() {
       deleteReviewedNote(item.note.id);
     },
     [deleteRecentNote, deleteReviewedNote]
+  );
+
+  const onQueueRowLayout = useCallback(
+    (noteId: string) => (event: LayoutChangeEvent) => {
+      const { width, height } = event.nativeEvent.layout;
+      setQueueRowSizes((prev) => {
+        const existing = prev[noteId];
+        if (existing?.width === width && existing.height === height) return prev;
+        return { ...prev, [noteId]: { width, height } };
+      });
+    },
+    []
+  );
+
+  const onStandingRowLayout = useCallback(
+    (messageId: string) => (event: LayoutChangeEvent) => {
+      const { width, height } = event.nativeEvent.layout;
+      setStandingRowSizes((prev) => {
+        const existing = prev[messageId];
+        if (existing?.width === width && existing.height === height) return prev;
+        return { ...prev, [messageId]: { width, height } };
+      });
+    },
+    []
   );
 
   return (
@@ -654,7 +698,7 @@ export default function EchoScreen() {
         <View style={styles.section}>
           <View style={styles.sectionHeaderRow}>
             <ThemedText type="subtitle" style={{ fontSize: 18 }}>
-              Home Screen Widget
+              Widget Preview
             </ThemedText>
             <Pressable
               onPress={() => setWidgetEnabled(!widgetPreferences.enabled)}
@@ -697,11 +741,6 @@ export default function EchoScreen() {
                 </View>
               )
             )}
-            <ThemedText style={{ fontSize: 13, color: palette.muted }}>
-              {widgetPreviewEntries.some((entry) => entry.targetUrl)
-                ? 'Tap to open the full entry'
-                : 'Widget preview'}
-            </ThemedText>
           </View>
         </View>
 
@@ -734,27 +773,81 @@ export default function EchoScreen() {
             </Pressable>
           </View>
           <View style={styles.standingRow}>
-            {standingMessages.map((message, index) => (
-              <Pressable
-                key={message.id}
-                onPress={() =>
-                  router.push({
-                    pathname: '/standing/[standingMessageId]',
-                    params: { standingMessageId: message.id },
-                  })
-                }
-                style={({ pressed }) => [
-                  styles.standingCard,
-                  {
-                    backgroundColor: palette.surface,
-                    borderColor: palette.border,
-                    opacity: pressed ? 0.7 : 1,
-                  },
-                ]}
-              >
-                <ThemedText style={{ fontSize: 14 }}>{message.text}</ThemedText>
-              </Pressable>
-            ))}
+            {standingMessages.map((message) => {
+              const standingSize = standingRowSizes[message.id];
+              const actionWidth = standingSize?.width ?? 0;
+              const actionHeight = standingSize?.height ?? 44;
+
+              return (
+                <Swipeable
+                  key={message.id}
+                  friction={1.1}
+                  leftThreshold={actionWidth ? Math.min(120, Math.max(60, actionWidth * 0.25)) : 60}
+                  overshootLeft={false}
+                  containerStyle={{ overflow: 'visible' }}
+                  childrenContainerStyle={{ overflow: 'visible' }}
+                  renderLeftActions={(_progress, dragX) => {
+                    if (!standingSize) return null;
+                    const translateIn = dragX.interpolate({
+                      inputRange: [0, actionWidth],
+                      outputRange: [-actionWidth, 0],
+                      extrapolate: 'clamp',
+                    });
+
+                    return (
+                      <View
+                        style={[
+                          styles.standingSwipeDeleteContainer,
+                          {
+                            width: actionWidth,
+                            height: actionHeight,
+                          },
+                        ]}
+                      >
+                        <Animated.View
+                          style={[
+                            styles.standingSwipeDeleteFill,
+                            {
+                              width: actionWidth,
+                              transform: [{ translateX: translateIn }],
+                              backgroundColor: colorScheme === 'dark' ? '#452323' : '#FDEAEA',
+                              borderColor: colorScheme === 'dark' ? '#6B3535' : '#F2C6C6',
+                            },
+                          ]}
+                        >
+                          <ThemedText style={{ color: colorScheme === 'dark' ? '#F2B8B5' : '#8C2B2B', fontSize: 13 }}>
+                            Delete
+                          </ThemedText>
+                        </Animated.View>
+                      </View>
+                    );
+                  }}
+                  onSwipeableOpen={(direction) => {
+                    if (direction === 'left') deleteStandingMessage(message.id);
+                  }}
+                >
+                  <Pressable
+                    onLayout={onStandingRowLayout(message.id)}
+                    onPress={() =>
+                      router.push({
+                        pathname: '/standing/[standingMessageId]',
+                        params: { standingMessageId: message.id },
+                      })
+                    }
+                    style={({ pressed }) => [
+                      styles.standingCard,
+                      {
+                        backgroundColor: palette.surface,
+                        borderColor: palette.border,
+                        opacity: pressed ? 0.7 : 1,
+                      },
+                    ]}
+                  >
+                    <ThemedText style={{ fontSize: 14 }}>{message.text}</ThemedText>
+                  </Pressable>
+                </Swipeable>
+              );
+            })}
             <Pressable
               onPress={() =>
                 router.push({
@@ -789,30 +882,59 @@ export default function EchoScreen() {
           <View style={styles.queueStack}>
             {echoQueue.map((item) => {
               const { note } = item;
+              const queueSize = queueRowSizes[note.id];
+              const actionWidth = queueSize?.width ?? 0;
+              const actionHeight = queueSize?.height ?? 68;
               return (
                 <Swipeable
                   key={note.id}
+                  friction={1.1}
+                  leftThreshold={actionWidth ? Math.min(120, Math.max(60, actionWidth * 0.25)) : 60}
                   overshootLeft={false}
-                  renderLeftActions={() => (
-                    <View
-                      style={[
-                        styles.queueSwipeDelete,
-                        {
-                          backgroundColor: colorScheme === 'dark' ? '#452323' : '#FDEAEA',
-                          borderColor: colorScheme === 'dark' ? '#6B3535' : '#F2C6C6',
-                        },
-                      ]}
-                    >
-                      <ThemedText style={{ color: colorScheme === 'dark' ? '#F2B8B5' : '#8C2B2B', fontSize: 13 }}>
-                        Delete
-                      </ThemedText>
-                    </View>
-                  )}
+                  containerStyle={{ overflow: 'visible' }}
+                  childrenContainerStyle={{ overflow: 'visible' }}
+                  renderLeftActions={(_progress, dragX) => {
+                    if (!queueSize) return null;
+                    const translateIn = dragX.interpolate({
+                      inputRange: [0, actionWidth],
+                      outputRange: [-actionWidth, 0],
+                      extrapolate: 'clamp',
+                    });
+
+                    return (
+                      <View
+                        style={[
+                          styles.queueSwipeDeleteContainer,
+                          {
+                            width: actionWidth,
+                            height: actionHeight,
+                          },
+                        ]}
+                      >
+                        <Animated.View
+                          style={[
+                            styles.queueSwipeDeleteFill,
+                            {
+                              width: actionWidth,
+                              transform: [{ translateX: translateIn }],
+                              backgroundColor: colorScheme === 'dark' ? '#452323' : '#FDEAEA',
+                              borderColor: colorScheme === 'dark' ? '#6B3535' : '#F2C6C6',
+                            },
+                          ]}
+                        >
+                          <ThemedText style={{ color: colorScheme === 'dark' ? '#F2B8B5' : '#8C2B2B', fontSize: 13 }}>
+                            Delete
+                          </ThemedText>
+                        </Animated.View>
+                      </View>
+                    );
+                  }}
                   onSwipeableOpen={(direction) => {
                     if (direction === 'left') deleteEchoQueueItem(item);
                   }}
                 >
                   <Pressable
+                    onLayout={onQueueRowLayout(note.id)}
                     onPress={() =>
                       router.push({
                         pathname: '/',
@@ -836,10 +958,10 @@ export default function EchoScreen() {
                       </View>
                       <View style={styles.queueMetaColumn}>
                         <ThemedText style={{ color: palette.muted, fontSize: 12 }} numberOfLines={1}>
-                          Next {formatNextEchoDate(note.echo.nextDueAt)}
+                          {formatNextEchoDate(note.echo.nextDueAt)}
                         </ThemedText>
                         <ThemedText style={{ color: palette.muted, fontSize: 12 }} numberOfLines={1}>
-                          Shown {note.echo.occurrenceCount}x
+                          {formatEchoProgress(note)}
                         </ThemedText>
                       </View>
                     </View>
@@ -976,9 +1098,14 @@ const styles = StyleSheet.create({
     padding: 12,
     minHeight: 68,
   },
-  queueSwipeDelete: {
-    width: 96,
-    minHeight: 68,
+  queueSwipeDeleteContainer: {
+    justifyContent: 'center',
+    alignItems: 'flex-start',
+    overflow: 'hidden',
+    borderRadius: 16,
+  },
+  queueSwipeDeleteFill: {
+    height: '100%',
     borderWidth: 1,
     borderRadius: 16,
     alignItems: 'center',
@@ -1013,9 +1140,9 @@ const styles = StyleSheet.create({
     borderRadius: 22,
     borderWidth: 1,
     padding: 16,
-    gap: 8,
+    gap: 10,
     minHeight: 140,
-    justifyContent: 'space-between',
+    justifyContent: 'flex-start',
   },
   previewRow: {
     flexDirection: 'row',
@@ -1029,6 +1156,19 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     borderWidth: 1,
     padding: 12,
+  },
+  standingSwipeDeleteContainer: {
+    justifyContent: 'center',
+    alignItems: 'flex-start',
+    overflow: 'hidden',
+    borderRadius: 16,
+  },
+  standingSwipeDeleteFill: {
+    height: '100%',
+    borderWidth: 1,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   addStanding: {
     borderStyle: 'dashed',

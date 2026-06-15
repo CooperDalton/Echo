@@ -15,7 +15,7 @@ export default function StandingMessageScreen() {
   const insets = useSafeAreaInsets();
   const colorScheme = useColorScheme() ?? 'light';
   const palette = Colors[colorScheme];
-  const { standingMessages, upsertStandingMessage, deleteStandingMessage } = useNotes();
+  const { standingMessages, upsertStandingMessage } = useNotes();
   const message = standingMessages.find((item) => item.id === standingMessageId);
   const isNew = standingMessageId === 'new';
   const [text, setText] = useState(message?.text ?? '');
@@ -40,20 +40,6 @@ export default function StandingMessageScreen() {
             <ThemedText style={{ color: palette.text }}>Cancel</ThemedText>
           </Pressable>
           <View style={styles.actions}>
-            {!isNew && message ? (
-              <Pressable
-                onPress={() => {
-                  deleteStandingMessage(message.id);
-                  router.replace('/echo');
-                }}
-                style={({ pressed }) => [
-                  styles.secondaryButton,
-                  { borderColor: '#C44E4E', backgroundColor: palette.surfaceAlt, opacity: pressed ? 0.7 : 1 },
-                ]}
-              >
-                <ThemedText style={{ color: '#C44E4E' }}>Delete</ThemedText>
-              </Pressable>
-            ) : null}
             <Pressable
               disabled={!canSave}
               onPress={() => {
@@ -127,4 +113,3 @@ const styles = StyleSheet.create({
     lineHeight: 22,
   },
 });
-

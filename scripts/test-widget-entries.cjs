@@ -77,7 +77,6 @@ function loadTs(relativeOrAbsolutePath) {
 }
 
 const {
-  EMPTY_WIDGET_TEXT,
   PAUSED_WIDGET_TEXT,
   WIDGET_TEXT_LIMIT,
   compactWidgetText,
@@ -211,7 +210,7 @@ test('disabled widget returns paused state', () => {
   ]);
 });
 
-test('empty widget returns calm state when standing messages are disabled', () => {
+test('empty widget returns no rows when standing messages are disabled', () => {
   const entries = createWidgetEntries(
     state({
       widgetPreferences: { enabled: true, includeStandingMessages: false },
@@ -220,7 +219,7 @@ test('empty widget returns calm state when standing messages are disabled', () =
     { now: '2026-06-15T12:00:00.000Z' }
   );
 
-  assert.equal(entries[0].text, EMPTY_WIDGET_TEXT);
+  assert.deepEqual(entries, []);
 });
 
 test('widget text is compacted and capped', () => {

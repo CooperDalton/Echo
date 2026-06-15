@@ -102,6 +102,7 @@ export default function RootLayout() {
         <Stack>
           <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
           <Stack.Screen name="checkin-flow" options={{ headerShown: false }} />
+          <Stack.Screen name="standing/[standingMessageId]" options={{ headerShown: false }} />
         </Stack>
         <NotificationRouter />
         <DeepLinkRouter />

@@ -11,7 +11,7 @@ export type EchoWidgetProps = {
   updatedAt: string;
 };
 
-export const EMPTY_WIDGET_TEXT = 'Nothing needs your attention.';
+export const EMPTY_WIDGET_TEXT = '';
 export const PAUSED_WIDGET_TEXT = 'Echo widget is paused.';
 export const WIDGET_TEXT_LIMIT = 180;
 export const MAX_WIDGET_ENTRIES = 3;
@@ -71,14 +71,7 @@ function pausedEntry(): WidgetEntry[] {
 }
 
 function emptyEntry(): WidgetEntry[] {
-  return [
-    {
-      id: 'empty',
-      kind: 'empty',
-      text: EMPTY_WIDGET_TEXT,
-      targetUrl: null,
-    },
-  ];
+  return [];
 }
 
 export function createWidgetEntries(
