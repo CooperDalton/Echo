@@ -2,9 +2,8 @@ import * as Notifications from 'expo-notifications';
 import { useRouter } from 'expo-router';
 import { useEffect, useMemo, useState } from 'react';
 import {
-  KeyboardAvoidingView,
+  Keyboard,
   Modal,
-  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -287,23 +286,24 @@ export default function CheckInScreen() {
         animationType="fade"
         onRequestClose={closeCheckInModal}>
         <Pressable onPress={closeCheckInModal} style={styles.modalOverlay}>
-          <KeyboardAvoidingView
-            behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-            style={styles.modalKeyboardWrap}>
-            <Pressable
-              onPress={(event) => event.stopPropagation()}
+          <Pressable
+            onPress={(event) => {
+              event.stopPropagation();
+              Keyboard.dismiss();
+            }}
+            style={[
+              styles.modalCard,
+              {
+                backgroundColor: palette.surface,
+                borderColor: palette.border,
+              },
+            ]}>
+            <View
               style={[
-                styles.modalCard,
-                {
-                  backgroundColor: palette.surface,
-                  borderColor: palette.border,
-                  paddingBottom: 20 + insets.bottom,
-                },
-              ]}>
-              <ScrollView
-                contentContainerStyle={styles.modalContent}
-                keyboardShouldPersistTaps="handled"
-                showsVerticalScrollIndicator={false}>
+                styles.modalContent,
+                { paddingBottom: 14 },
+              ]}
+            >
                 <View style={styles.modalHeader}>
                   <View style={styles.modalHeaderCopy}>
                     <ThemedText type="subtitle" style={styles.modalTitle}>
@@ -330,14 +330,12 @@ export default function CheckInScreen() {
                   </Pressable>
                 </View>
 
-                <View style={styles.section}>
-                  <ThemedText style={[styles.sectionLabel, { color: palette.muted }]}>
-                    Energy
-                  </ThemedText>
+                <View style={[styles.section, energyMenuOpen && styles.dropdownSectionOpen]}>
                   <View style={styles.dropdownWrap}>
                     <Pressable
                       onPress={(event) => {
                         event.stopPropagation();
+                        Keyboard.dismiss();
                         setEnergyMenuOpen((open) => !open);
                         setEmotionMenuOpen(false);
                       }}
@@ -404,14 +402,12 @@ export default function CheckInScreen() {
                   </View>
                 </View>
 
-                <View style={styles.section}>
-                  <ThemedText style={[styles.sectionLabel, { color: palette.muted }]}>
-                    Emotion
-                  </ThemedText>
+                <View style={[styles.section, emotionMenuOpen && styles.dropdownSectionOpen]}>
                   <View style={styles.dropdownWrap}>
                     <Pressable
                       onPress={(event) => {
                         event.stopPropagation();
+                        Keyboard.dismiss();
                         setEmotionMenuOpen((open) => !open);
                         setEnergyMenuOpen(false);
                       }}
@@ -460,9 +456,7 @@ export default function CheckInScreen() {
                               style={({ pressed }) => [
                                 styles.dropdownOption,
                                 {
-                                  backgroundColor: selected
-                                    ? EMOTION_BACKGROUNDS[emotion][colorScheme]
-                                    : 'transparent',
+                                  backgroundColor: EMOTION_BACKGROUNDS[emotion][colorScheme],
                                   opacity: pressed ? 0.8 : 1,
                                 },
                               ]}>
@@ -488,15 +482,14 @@ export default function CheckInScreen() {
                 </View>
 
                 <View style={styles.section}>
-                  <ThemedText style={[styles.sectionLabel, { color: palette.muted }]}>
-                    What happened
-                  </ThemedText>
                   <TextInput
                     multiline
+                    scrollEnabled
                     placeholder="Write a few sentences about the day."
                     placeholderTextColor={palette.muted}
                     value={draftBody}
                     onChangeText={setDraftBody}
+                    onPressIn={(event) => event.stopPropagation()}
                     textAlignVertical="top"
                     style={[
                       styles.textArea,
@@ -540,9 +533,8 @@ export default function CheckInScreen() {
                     </ThemedText>
                   </Pressable>
                 </View>
-              </ScrollView>
-            </Pressable>
-          </KeyboardAvoidingView>
+            </View>
+          </Pressable>
         </Pressable>
       </Modal>
     </ThemedView>
@@ -645,10 +637,8 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     paddingHorizontal: 16,
   },
-  modalKeyboardWrap: {
-    width: '100%',
-  },
   modalCard: {
+    width: '100%',
     borderWidth: 1,
     borderRadius: 24,
     maxHeight: '88%',
@@ -685,15 +675,14 @@ const styles = StyleSheet.create({
     position: 'relative',
     zIndex: 1,
   },
-  sectionLabel: {
-    fontSize: 13,
-    fontWeight: '600',
-    textTransform: 'uppercase',
-    letterSpacing: 0.6,
+  dropdownSectionOpen: {
+    zIndex: 100,
+    elevation: 100,
   },
   dropdownWrap: {
     position: 'relative',
-    zIndex: 5,
+    zIndex: 10,
+    elevation: 10,
   },
   dropdownTrigger: {
     minHeight: 48,
@@ -727,7 +716,8 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.12,
     shadowRadius: 12,
     shadowOffset: { width: 0, height: 8 },
-    elevation: 6,
+    zIndex: 1000,
+    elevation: 1000,
   },
   dropdownOption: {
     minHeight: 44,
@@ -736,7 +726,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   textArea: {
-    minHeight: 280,
+    height: 330,
     borderWidth: 1,
     borderRadius: 18,
     paddingHorizontal: 14,

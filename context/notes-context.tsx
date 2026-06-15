@@ -17,7 +17,6 @@ import { classifyNote } from '@/lib/notes/classify-note';
 import {
   createCheckInFilePath,
   createNoteFilePath,
-  deleteVaultFile,
   loadNotesState,
   saveNotesState,
 } from '@/lib/notes/storage';
@@ -36,7 +35,7 @@ import {
   type StandingMessage,
 } from '@/lib/notes/types';
 import { loadSyncConfig, syncPendingReason } from '@/lib/sync/config';
-import { runVaultSync, shortenWidgetNoteViaBackend } from '@/lib/sync/service';
+import { runSupabaseSync, shortenWidgetNoteViaBackend } from '@/lib/sync/service';
 import type { EchoSyncConfig, SyncStatus } from '@/lib/sync/types';
 import { compactWidgetText, WIDGET_TEXT_LIMIT } from '@/lib/widgets/entries';
 import { createEchoScheduleForNote } from '@/lib/widgets/schedule';
@@ -280,7 +279,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       }));
 
       try {
-        const result = await runVaultSync(stateRef.current);
+        const result = await runSupabaseSync(stateRef.current);
         dirtyRef.current = false;
         stateRef.current = result.state;
         setState(result.state);
@@ -527,7 +526,6 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     commitState((prev) => {
       const note = prev.recent.find((item) => item.id === noteId);
       if (!note) return prev;
-      void deleteVaultFile(note.filePath);
 
       return {
         ...prev,
@@ -542,7 +540,6 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     commitState((prev) => {
       const note = prev.reviewed.find((item) => item.id === noteId);
       if (!note) return prev;
-      void deleteVaultFile(note.filePath);
 
       return {
         ...prev,

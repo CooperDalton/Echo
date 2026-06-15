@@ -1,61 +1,62 @@
 import type { BucketPreferences, CheckIn, DeletedNote, Note, NotesState, StandingMessage } from './contracts';
-import {
-  createCommit,
-  createTree,
-  getBlob,
-  getCommit,
-  getRef,
-  getTree,
-  type GitHubTreeEntry,
-  updateRef,
-} from './github';
-import {
-  BUCKET_PREFERENCES_PATH,
-  DELETED_NOTES_PATH,
-  STANDING_MESSAGES_PATH,
-  notePath,
-  checkInPath,
-  parseBucketPreferences,
-  parseDeletedNotes,
-  parseStandingMessages,
-  parseCheckInFile,
-  parseNoteFile,
-  serializeBucketPreferences,
-  serializeDeletedNotes,
-  serializeStandingMessages,
-  serializeCheckIn,
-  serializeNote,
-  systemFiles,
-} from './markdown';
-
-type RepoRef = {
-  owner: string;
-  repo: string;
-  branch: string;
-};
-
-type RepoSnapshot = {
-  notes: Note[];
-  checkIns: CheckIn[];
-  deletedNotes: DeletedNote[];
-  bucketPreferences: BucketPreferences;
-  standingMessages: StandingMessage[];
-  baseTreeSha: string;
-  headCommitSha: string;
-  existingFiles: Map<string, string>;
-};
+import { supabase } from './supabase';
 
 type SyncSummary = {
   pushedNotes: number;
   pushedCheckIns: number;
   pulledNotes: number;
   pulledCheckIns: number;
-  committedFiles: number;
+  storedRows: number;
 };
 
 type SyncOutput = {
   state: NotesState;
   summary: SyncSummary;
+};
+
+type NoteRow = {
+  id: string;
+  title: string;
+  body: string;
+  created_at: string;
+  updated_at: string;
+  bucket: Note['bucket'];
+  classification_status: Note['classificationStatus'];
+  classification_method: Note['classificationMethod'];
+  classification_confidence: number | null;
+  widget_text: string | null;
+  echo: Note['echo'];
+  file_path: string | null;
+};
+
+type CheckInRow = {
+  id: string;
+  created_at: string;
+  kind: CheckIn['kind'];
+  source: CheckIn['source'];
+  energy: number;
+  emotions: CheckIn['emotions'];
+  body: string;
+  file_path: string | null;
+};
+
+type DeletedNoteRow = {
+  id: string;
+  file_path: string | null;
+  deleted_at: string;
+};
+
+type BucketPreferencesRow = {
+  id: 'default';
+  builtins: BucketPreferences['builtins'];
+  customs: BucketPreferences['customs'];
+};
+
+type StandingMessageRow = {
+  id: string;
+  text: string;
+  created_at: string;
+  updated_at: string;
 };
 
 function compareIsoDates(left: string, right: string): number {
@@ -81,16 +82,8 @@ function mergeNotes(local: Note[], remote: Note[]): Note[] {
 
   local.forEach((note) => {
     const existing = map.get(note.id);
-    if (!existing) {
+    if (!existing || compareIsoDates(note.updatedAt, existing.updatedAt) > 0) {
       map.set(note.id, note);
-      return;
-    }
-
-    if (compareIsoDates(note.updatedAt, existing.updatedAt) > 0) {
-      map.set(note.id, {
-        ...note,
-        filePath: note.filePath ?? existing.filePath,
-      });
     }
   });
 
@@ -105,9 +98,7 @@ function mergeCheckIns(local: CheckIn[], remote: CheckIn[]): CheckIn[] {
   });
 
   local.forEach((checkIn) => {
-    if (!map.has(checkIn.id)) {
-      map.set(checkIn.id, checkIn);
-    }
+    map.set(checkIn.id, checkIn);
   });
 
   return sortNewestFirst([...map.values()]);
@@ -143,175 +134,229 @@ function mergeBucketPreferences(
   };
 }
 
-function decodeBase64(content: string): string {
-  return Buffer.from(content, 'base64').toString('utf8');
-}
-
-function isVaultManagedPath(path: string | undefined): path is string {
-  return Boolean(
-    path &&
-      ((path.endsWith('.md') &&
-        (path.startsWith('Echo/Notes/') || path.startsWith('Echo/Checkins/'))) ||
-        path === DELETED_NOTES_PATH ||
-        path === BUCKET_PREFERENCES_PATH ||
-        path === STANDING_MESSAGES_PATH)
-  );
-}
-
-async function fetchMarkdownFiles(
-  repo: RepoRef,
-  tree: GitHubTreeEntry[]
-): Promise<Map<string, string>> {
-  const fileMap = new Map<string, string>();
-
-  for (const entry of tree) {
-    if (entry.type !== 'blob' || !entry.sha || !isVaultManagedPath(entry.path)) continue;
-
-    const blob = await getBlob(repo.owner, repo.repo, entry.sha);
-    fileMap.set(entry.path, decodeBase64(blob.content));
-  }
-
-  return fileMap;
-}
-
-export async function loadRepoSnapshot(repo: RepoRef): Promise<RepoSnapshot> {
-  const ref = await getRef(repo.owner, repo.repo, repo.branch);
-  const commit = await getCommit(repo.owner, repo.repo, ref.object.sha);
-  const treeResponse = await getTree(repo.owner, repo.repo, commit.tree.sha);
-
-  const existingFiles = await fetchMarkdownFiles(repo, treeResponse.tree);
-  const notes: Note[] = [];
-  const checkIns: CheckIn[] = [];
-  const deletedNotes = parseDeletedNotes(existingFiles.get(DELETED_NOTES_PATH) ?? '[]');
-  const bucketPreferences = parseBucketPreferences(
-    existingFiles.get(BUCKET_PREFERENCES_PATH) ?? '{}'
-  );
-  const standingMessages = parseStandingMessages(
-    existingFiles.get(STANDING_MESSAGES_PATH) ?? '[]'
-  );
-
-  existingFiles.forEach((markdown, path) => {
-    if (path === DELETED_NOTES_PATH || path === BUCKET_PREFERENCES_PATH || path === STANDING_MESSAGES_PATH) return;
-    if (path.startsWith('Echo/Notes/')) {
-      const parsed = parseNoteFile(markdown, path);
-      if (parsed) notes.push(parsed);
-      return;
-    }
-
-    if (path.startsWith('Echo/Checkins/')) {
-      const parsed = parseCheckInFile(markdown, path);
-      if (parsed) checkIns.push(parsed);
-    }
-  });
-
+function noteFromRow(row: NoteRow): Note {
   return {
-    notes: sortNewestFirst(notes),
-    checkIns: sortNewestFirst(checkIns),
-    deletedNotes,
-    bucketPreferences,
-    standingMessages,
-    baseTreeSha: commit.tree.sha,
-    headCommitSha: commit.sha,
-    existingFiles,
+    id: row.id,
+    title: row.title,
+    body: row.body,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+    bucket: row.bucket,
+    classificationStatus: row.classification_status,
+    classificationMethod: row.classification_method,
+    classificationConfidence: row.classification_confidence,
+    widgetText: row.widget_text,
+    echo: row.echo,
+    filePath: row.file_path,
   };
 }
 
-async function commitFiles(
-  repo: RepoRef,
-  snapshot: RepoSnapshot,
-  desiredFiles: Map<string, string>,
-  deviceId: string
-): Promise<number> {
-  const changedEntries = [...desiredFiles.entries()]
-    .filter(([path, content]) => snapshot.existingFiles.get(path) !== content)
-    .map(([path, content]) => ({
-      path,
-      mode: '100644' as const,
-      type: 'blob' as const,
-      content,
-    }));
-
-  const deletedEntries = [...snapshot.existingFiles.keys()]
-    .filter((path) => isVaultManagedPath(path) && !desiredFiles.has(path))
-    .map((path) => ({
-      path,
-      mode: '100644' as const,
-      type: 'blob' as const,
-      sha: null,
-    }));
-
-  const treeEntries = [...changedEntries, ...deletedEntries];
-
-  if (treeEntries.length === 0) {
-    return 0;
-  }
-
-  const newTree = await createTree(repo.owner, repo.repo, snapshot.baseTreeSha, treeEntries);
-  const commit = await createCommit(
-    repo.owner,
-    repo.repo,
-    `Sync Echo vault from ${deviceId}`,
-    newTree.sha,
-    snapshot.headCommitSha
-  );
-  await updateRef(repo.owner, repo.repo, repo.branch, commit.sha);
-
-  return treeEntries.length;
+function noteToRow(note: Note): NoteRow {
+  return {
+    id: note.id,
+    title: note.title,
+    body: note.body,
+    created_at: note.createdAt,
+    updated_at: note.updatedAt,
+    bucket: note.bucket,
+    classification_status: note.classificationStatus,
+    classification_method: note.classificationMethod,
+    classification_confidence: note.classificationConfidence,
+    widget_text: note.widgetText,
+    echo: note.echo,
+    file_path: note.filePath,
+  };
 }
 
-export async function syncRepoSnapshot(
-  repo: RepoRef,
+function checkInFromRow(row: CheckInRow): CheckIn {
+  return {
+    id: row.id,
+    createdAt: row.created_at,
+    kind: row.kind,
+    source: row.source,
+    energy: row.energy,
+    emotions: row.emotions,
+    body: row.body,
+    filePath: row.file_path,
+  };
+}
+
+function checkInToRow(checkIn: CheckIn): CheckInRow {
+  return {
+    id: checkIn.id,
+    created_at: checkIn.createdAt,
+    kind: checkIn.kind,
+    source: checkIn.source,
+    energy: checkIn.energy,
+    emotions: checkIn.emotions,
+    body: checkIn.body,
+    file_path: checkIn.filePath,
+  };
+}
+
+function deletedNoteFromRow(row: DeletedNoteRow): DeletedNote {
+  return {
+    id: row.id,
+    filePath: row.file_path,
+    deletedAt: row.deleted_at,
+  };
+}
+
+function deletedNoteToRow(deletedNote: DeletedNote): DeletedNoteRow {
+  return {
+    id: deletedNote.id,
+    file_path: deletedNote.filePath,
+    deleted_at: deletedNote.deletedAt,
+  };
+}
+
+function standingMessageFromRow(row: StandingMessageRow): StandingMessage {
+  return {
+    id: row.id,
+    text: row.text,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+function standingMessageToRow(message: StandingMessage): StandingMessageRow {
+  return {
+    id: message.id,
+    text: message.text,
+    created_at: message.createdAt,
+    updated_at: message.updatedAt,
+  };
+}
+
+async function readTable<T>(table: string, orderColumn: string): Promise<T[]> {
+  const { data, error } = await supabase.from(table).select('*').order(orderColumn, {
+    ascending: false,
+  });
+
+  if (error) throw error;
+  return (data ?? []) as T[];
+}
+
+async function loadSupabaseSnapshot(): Promise<NotesState> {
+  const [noteRows, checkInRows, deletedNoteRows, bucketPreferencesRows, standingMessageRows] =
+    await Promise.all([
+      readTable<NoteRow>('notes', 'created_at'),
+      readTable<CheckInRow>('check_ins', 'created_at'),
+      readTable<DeletedNoteRow>('deleted_notes', 'deleted_at'),
+      supabase.from('bucket_preferences').select('*').eq('id', 'default').maybeSingle(),
+      supabase.from('standing_messages').select('*').order('created_at', { ascending: true }),
+    ]);
+
+  if (bucketPreferencesRows.error) throw bucketPreferencesRows.error;
+  if (standingMessageRows.error) throw standingMessageRows.error;
+
+  const deletedNotes = deletedNoteRows.map(deletedNoteFromRow);
+  const deletedIds = new Set(deletedNotes.map((deletedNote) => deletedNote.id));
+  const notes = noteRows.map(noteFromRow).filter((note) => !deletedIds.has(note.id));
+  const bucketPreferencesRow = bucketPreferencesRows.data as BucketPreferencesRow | null;
+
+  return {
+    recent: sortNewestFirst(notes.filter((note) => note.echo.state !== 'reviewed')),
+    reviewed: sortNewestFirst(notes.filter((note) => note.echo.state === 'reviewed')),
+    checkIns: sortNewestFirst(checkInRows.map(checkInFromRow)),
+    deletedNotes,
+    bucketPreferences: {
+      builtins: bucketPreferencesRow?.builtins ?? {},
+      customs: bucketPreferencesRow?.customs ?? [],
+    },
+    standingMessages: ((standingMessageRows.data ?? []) as StandingMessageRow[]).map(
+      standingMessageFromRow
+    ),
+  };
+}
+
+async function upsertRows<T extends { id: string }>(table: string, rows: T[]): Promise<number> {
+  if (rows.length === 0) return 0;
+
+  const { error } = await supabase.from(table).upsert(rows, { onConflict: 'id' });
+  if (error) throw error;
+  return rows.length;
+}
+
+async function persistSupabaseSnapshot(state: NotesState, deviceId: string): Promise<number> {
+  const notes = [...state.recent, ...state.reviewed];
+  const deletedIds = state.deletedNotes.map((deletedNote) => deletedNote.id);
+  let storedRows = 0;
+
+  if (deletedIds.length > 0) {
+    const { error } = await supabase.from('notes').delete().in('id', deletedIds);
+    if (error) throw error;
+  }
+
+  storedRows += await upsertRows('notes', notes.map(noteToRow));
+  storedRows += await upsertRows('check_ins', state.checkIns.map(checkInToRow));
+  storedRows += await upsertRows('deleted_notes', state.deletedNotes.map(deletedNoteToRow));
+  storedRows += await upsertRows(
+    'standing_messages',
+    state.standingMessages.map(standingMessageToRow)
+  );
+
+  const { error: bucketPreferencesError } = await supabase.from('bucket_preferences').upsert(
+    {
+      id: 'default',
+      builtins: state.bucketPreferences.builtins,
+      customs: state.bucketPreferences.customs,
+    },
+    { onConflict: 'id' }
+  );
+  if (bucketPreferencesError) throw bucketPreferencesError;
+  storedRows += 1;
+
+  const { error: deviceError } = await supabase.from('sync_devices').upsert(
+    {
+      id: deviceId,
+      last_seen_at: new Date().toISOString(),
+    },
+    { onConflict: 'id' }
+  );
+  if (deviceError) throw deviceError;
+  storedRows += 1;
+
+  return storedRows;
+}
+
+export async function syncSupabaseSnapshot(
   state: NotesState,
   deviceId: string
 ): Promise<SyncOutput> {
-  const remote = await loadRepoSnapshot(repo);
+  const remote = await loadSupabaseSnapshot();
   const mergedDeletedNotes = mergeDeletedNotes(state.deletedNotes, remote.deletedNotes);
   const mergedBucketPreferences = mergeBucketPreferences(
     state.bucketPreferences,
     remote.bucketPreferences
   );
   const deletedIds = new Set(mergedDeletedNotes.map((deletedNote) => deletedNote.id));
-  const mergedNotes = mergeNotes([...state.recent, ...state.reviewed], remote.notes).filter(
-    (note) => !deletedIds.has(note.id)
-  );
+  const mergedNotes = mergeNotes([...state.recent, ...state.reviewed], [
+    ...remote.recent,
+    ...remote.reviewed,
+  ]).filter((note) => !deletedIds.has(note.id));
   const mergedCheckIns = mergeCheckIns(state.checkIns, remote.checkIns);
   const mergedStandingMessages =
     state.standingMessages.length > 0 ? state.standingMessages : remote.standingMessages;
 
-  const desiredFiles = new Map<string, string>();
-  mergedNotes.forEach((note) => {
-    desiredFiles.set(note.filePath ?? notePath(note), serializeNote(note));
-  });
-  mergedCheckIns.forEach((checkIn) => {
-    desiredFiles.set(checkIn.filePath ?? checkInPath(checkIn), serializeCheckIn(checkIn));
-  });
-  Object.entries(systemFiles()).forEach(([path, content]) => {
-    desiredFiles.set(path, content);
-  });
-  desiredFiles.set(DELETED_NOTES_PATH, serializeDeletedNotes(mergedDeletedNotes));
-  desiredFiles.set(
-    BUCKET_PREFERENCES_PATH,
-    serializeBucketPreferences(mergedBucketPreferences)
-  );
-  desiredFiles.set(STANDING_MESSAGES_PATH, serializeStandingMessages(mergedStandingMessages));
-
-  const committedFiles = await commitFiles(repo, remote, desiredFiles, deviceId);
+  const mergedState: NotesState = {
+    recent: mergedNotes.filter((note) => note.echo.state !== 'reviewed'),
+    reviewed: mergedNotes.filter((note) => note.echo.state === 'reviewed'),
+    checkIns: mergedCheckIns,
+    deletedNotes: mergedDeletedNotes,
+    bucketPreferences: mergedBucketPreferences,
+    standingMessages: mergedStandingMessages,
+  };
+  const storedRows = await persistSupabaseSnapshot(mergedState, deviceId);
 
   return {
-    state: {
-      recent: mergedNotes.filter((note) => note.echo.state !== 'reviewed'),
-      reviewed: mergedNotes.filter((note) => note.echo.state === 'reviewed'),
-      checkIns: mergedCheckIns,
-      deletedNotes: mergedDeletedNotes,
-      bucketPreferences: mergedBucketPreferences,
-      standingMessages: mergedStandingMessages,
-    },
+    state: mergedState,
     summary: {
       pushedNotes: state.recent.length + state.reviewed.length,
       pushedCheckIns: state.checkIns.length,
-      pulledNotes: remote.notes.length,
+      pulledNotes: remote.recent.length + remote.reviewed.length,
       pulledCheckIns: remote.checkIns.length,
-      committedFiles,
+      storedRows,
     },
   };
 }

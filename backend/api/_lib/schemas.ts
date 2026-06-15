@@ -80,7 +80,6 @@ export const repoSchema = z.object({
 });
 
 export const classifyRequestSchema = z.object({
-  repo: repoSchema.partial().optional(),
   note: noteSchema.pick({
     id: true,
     title: true,
@@ -101,7 +100,6 @@ export const shortenWidgetNoteRequestSchema = z.object({
 
 export const syncRequestSchema = z.object({
   deviceId: z.string().min(1),
-  repo: repoSchema,
   snapshot: z.object({
     notes: z.array(noteSchema),
     checkIns: z.array(checkInSchema),

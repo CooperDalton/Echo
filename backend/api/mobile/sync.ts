@@ -1,7 +1,7 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { z } from 'zod';
 
-import { syncRepoSnapshot } from '../../src/sync';
+import { syncSupabaseSnapshot } from '../../src/sync';
 import { handleOptions, sendError, sendJson } from '../_lib/http';
 import { syncRequestSchema } from '../_lib/schemas';
 
@@ -26,12 +26,7 @@ export default async function handler(
 
   try {
     const parsed = syncRequestSchema.parse(req.body);
-    const merged = await syncRepoSnapshot(
-      {
-        owner: parsed.repo.owner,
-        repo: parsed.repo.name,
-        branch: parsed.repo.branch,
-      },
+    const merged = await syncSupabaseSnapshot(
       {
         recent: parsed.snapshot.notes.filter((note) => note.echo.state !== 'reviewed'),
         reviewed: parsed.snapshot.notes.filter((note) => note.echo.state === 'reviewed'),

@@ -13,7 +13,7 @@
     "vercel:build": "vercel build"
   },
   "dependencies": {
-    "@octokit/rest": "^22.0.0",
+    "@supabase/supabase-js": "^2.108.1",
     "dotenv": "^17.2.3",
     "openai": "^6.4.0",
     "zod": "^4.1.12"

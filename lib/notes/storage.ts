@@ -19,6 +19,7 @@ import {
 } from '@/lib/notes/types';
 import { normalizeEchoSchedule } from '@/lib/widgets/schedule';
 
+const NOTES_STORAGE_FILE = `${FileSystem.documentDirectory ?? ''}echo-notes-v2.json`;
 const LEGACY_NOTES_STORAGE_FILE = `${FileSystem.documentDirectory ?? ''}echo-notes-v1.json`;
 const VAULT_ROOT = `${FileSystem.documentDirectory ?? ''}life-os`;
 const ECHO_ROOT = `${VAULT_ROOT}/Echo`;
@@ -578,7 +579,138 @@ async function loadLegacyState(): Promise<NotesState> {
   }
 }
 
+function normalizeNote(value: unknown): Note | null {
+  if (!value || typeof value !== 'object') return null;
+  const note = value as Partial<Note>;
+  if (
+    typeof note.id !== 'string' ||
+    typeof note.title !== 'string' ||
+    typeof note.body !== 'string' ||
+    typeof note.createdAt !== 'string'
+  ) {
+    return null;
+  }
+  if (!(note.bucket === null || note.bucket === undefined || isBucketName(note.bucket))) return null;
+  if (!isClassificationStatus(note.classificationStatus)) return null;
+
+  return {
+    id: note.id,
+    title: note.title,
+    body: note.body,
+    createdAt: note.createdAt,
+    updatedAt: typeof note.updatedAt === 'string' ? note.updatedAt : note.createdAt,
+    bucket: note.bucket ?? null,
+    classificationStatus: note.classificationStatus,
+    classificationMethod: isClassificationMethod(note.classificationMethod)
+      ? note.classificationMethod
+      : 'unknown',
+    classificationConfidence:
+      typeof note.classificationConfidence === 'number' ? note.classificationConfidence : null,
+    widgetText: typeof note.widgetText === 'string' ? note.widgetText : null,
+    echo: normalizeEchoSchedule(note.echo ?? null, note.createdAt, note.id),
+    filePath: typeof note.filePath === 'string' ? note.filePath : null,
+  };
+}
+
+function normalizeCheckIn(value: unknown): CheckIn | null {
+  if (!value || typeof value !== 'object') return null;
+  const checkIn = value as Partial<CheckIn>;
+  if (
+    typeof checkIn.id !== 'string' ||
+    typeof checkIn.createdAt !== 'string' ||
+    !isCheckInKind(checkIn.kind) ||
+    typeof checkIn.energy !== 'number' ||
+    typeof checkIn.body !== 'string'
+  ) {
+    return null;
+  }
+
+  const rawEmotions =
+    checkIn.emotions && typeof checkIn.emotions === 'object'
+      ? (checkIn.emotions as Partial<Record<CheckInEmotion, boolean>>)
+      : {};
+  const emotions = CHECK_IN_EMOTIONS.reduce(
+    (result, emotion) => ({ ...result, [emotion]: rawEmotions[emotion] === true }),
+    {} as Record<CheckInEmotion, boolean>
+  );
+
+  return {
+    id: checkIn.id,
+    createdAt: checkIn.createdAt,
+    kind: checkIn.kind,
+    source: checkIn.source === 'obsidian' ? 'obsidian' : 'mobile',
+    energy: Math.min(5, Math.max(1, Math.round(checkIn.energy))),
+    emotions,
+    body: checkIn.body,
+    filePath: typeof checkIn.filePath === 'string' ? checkIn.filePath : null,
+  };
+}
+
+function normalizeNotesState(value: unknown): NotesState {
+  if (!value || typeof value !== 'object') return EMPTY_NOTES_STATE;
+  const parsed = value as Partial<NotesState>;
+
+  const deletedNotes = Array.isArray(parsed.deletedNotes)
+    ? parsed.deletedNotes
+        .map(normalizeDeletedNote)
+        .filter((deletedNote): deletedNote is DeletedNote => deletedNote !== null)
+    : [];
+  const deletedIds = new Set(deletedNotes.map((deletedNote) => deletedNote.id));
+  const recent = Array.isArray(parsed.recent)
+    ? parsed.recent
+        .map(normalizeNote)
+        .filter((note): note is Note => note !== null && !deletedIds.has(note.id))
+    : [];
+  const reviewed = Array.isArray(parsed.reviewed)
+    ? parsed.reviewed
+        .map(normalizeNote)
+        .filter((note): note is Note => note !== null && !deletedIds.has(note.id))
+    : [];
+  const checkIns = Array.isArray(parsed.checkIns)
+    ? parsed.checkIns
+        .map(normalizeCheckIn)
+        .filter((checkIn): checkIn is CheckIn => checkIn !== null)
+    : [];
+
+  return {
+    recent: sortNewestFirst(recent),
+    reviewed: sortNewestFirst(reviewed),
+    checkIns: sortNewestFirst(checkIns),
+    deletedNotes: deletedNotes.sort((a, b) => b.deletedAt.localeCompare(a.deletedAt)),
+    bucketPreferences: parsed.bucketPreferences
+      ? {
+          builtins: parsed.bucketPreferences.builtins ?? {},
+          customs: Array.isArray(parsed.bucketPreferences.customs)
+            ? parsed.bucketPreferences.customs
+                .map(normalizeBucketDraft)
+                .filter((draft): draft is BucketDraft => draft !== null)
+            : [],
+        }
+      : EMPTY_NOTES_STATE.bucketPreferences,
+    standingMessages: Array.isArray(parsed.standingMessages)
+      ? parsed.standingMessages
+          .map(normalizeStandingMessage)
+          .filter((message): message is StandingMessage => message !== null)
+          .sort((a, b) => a.createdAt.localeCompare(b.createdAt))
+      : [],
+  };
+}
+
+async function loadJsonState(): Promise<NotesState | null> {
+  if (!NOTES_STORAGE_FILE || !(await fileExists(NOTES_STORAGE_FILE))) return null;
+
+  try {
+    const raw = await FileSystem.readAsStringAsync(NOTES_STORAGE_FILE);
+    return normalizeNotesState(JSON.parse(raw) as unknown);
+  } catch {
+    return EMPTY_NOTES_STATE;
+  }
+}
+
 export async function loadNotesState(): Promise<NotesState> {
+  const jsonState = await loadJsonState();
+  if (jsonState) return jsonState;
+
   if (!VAULT_ROOT) return EMPTY_NOTES_STATE;
 
   try {
@@ -627,42 +759,10 @@ export async function loadNotesState(): Promise<NotesState> {
 }
 
 export async function saveNotesState(state: NotesState): Promise<void> {
-  if (!VAULT_ROOT) return;
+  if (!NOTES_STORAGE_FILE) return;
 
   try {
-    await ensureDirectory(VAULT_ROOT);
-    await writeSystemFiles();
-
-    await Promise.all(
-      [...state.recent, ...state.reviewed].map(async (note) => {
-        const path = notePath(note);
-        await writeMarkdownFile(path, serializeNote({ ...note, filePath: relativeVaultPath(path) }));
-      })
-    );
-
-    await Promise.all(
-      state.checkIns.map(async (checkIn) => {
-        const path = checkInPath(checkIn);
-        await writeMarkdownFile(path, serializeCheckIn({ ...checkIn, filePath: relativeVaultPath(path) }));
-      })
-    );
-
-    await Promise.all(
-      state.deletedNotes.map((deletedNote) => deleteVaultFile(deletedNote.filePath))
-    );
-
-    await FileSystem.writeAsStringAsync(
-      DELETED_NOTES_FILE,
-      JSON.stringify(state.deletedNotes, null, 2)
-    );
-    await FileSystem.writeAsStringAsync(
-      BUCKET_PREFERENCES_FILE,
-      JSON.stringify(state.bucketPreferences, null, 2)
-    );
-    await FileSystem.writeAsStringAsync(
-      STANDING_MESSAGES_FILE,
-      JSON.stringify(state.standingMessages, null, 2)
-    );
+    await FileSystem.writeAsStringAsync(NOTES_STORAGE_FILE, JSON.stringify(state, null, 2));
   } catch {
     // Keep in-memory state as source-of-truth even when persistence fails.
   }
@@ -675,6 +775,9 @@ export async function clearNotesState(): Promise<void> {
     if (await fileExists(VAULT_ROOT)) {
       await FileSystem.deleteAsync(VAULT_ROOT, { idempotent: true });
     }
+    if (await fileExists(NOTES_STORAGE_FILE)) {
+      await FileSystem.deleteAsync(NOTES_STORAGE_FILE, { idempotent: true });
+    }
     if (await fileExists(LEGACY_NOTES_STORAGE_FILE)) {
       await FileSystem.deleteAsync(LEGACY_NOTES_STORAGE_FILE, { idempotent: true });
     }
@@ -683,23 +786,14 @@ export async function clearNotesState(): Promise<void> {
   }
 }
 
-export function createNoteFilePath(note: Note): string {
-  return relativeVaultPath(notePath(note));
+export function createNoteFilePath(_note: Note): string | null {
+  return null;
 }
 
-export function createCheckInFilePath(checkIn: CheckIn): string {
-  return relativeVaultPath(checkInPath(checkIn));
+export function createCheckInFilePath(_checkIn: CheckIn): string | null {
+  return null;
 }
 
-export async function deleteVaultFile(filePath: string | null): Promise<void> {
-  if (!filePath) return;
-
-  try {
-    const path = filePath.startsWith(VAULT_ROOT) ? filePath : `${VAULT_ROOT}/${filePath}`;
-    if (await fileExists(path)) {
-      await FileSystem.deleteAsync(path, { idempotent: true });
-    }
-  } catch {
-    // No-op when file cleanup fails.
-  }
+export async function deleteVaultFile(_filePath: string | null): Promise<void> {
+  return;
 }

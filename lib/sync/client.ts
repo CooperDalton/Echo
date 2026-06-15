@@ -9,11 +9,6 @@ import type {
 
 type SyncRequestBody = {
   deviceId: string;
-  repo: {
-    owner: string;
-    name: string;
-    branch: string;
-  };
   snapshot: {
     notes: Note[];
     checkIns: CheckIn[];
@@ -48,11 +43,6 @@ type ClassifyResponseBody = {
 
 type ClassifyRequestBody = {
   note: Pick<Note, 'id' | 'title' | 'body' | 'createdAt' | 'updatedAt'>;
-  repo?: {
-    owner?: string | null;
-    name?: string | null;
-    branch?: string | null;
-  };
 };
 
 type ShortenWidgetNoteResponseBody = {
@@ -80,22 +70,17 @@ async function postJson<TResponse>(url: string, body: unknown): Promise<TRespons
   return (await response.json()) as TResponse;
 }
 
-export async function syncVaultSnapshot(
+export async function syncRemoteSnapshot(
   config: EchoSyncConfig,
   state: NotesState
 ): Promise<SyncResult> {
-  if (!config.apiBaseUrl || !config.repoOwner || !config.repoName) {
+  if (!config.apiBaseUrl) {
     throw new Error('Sync is not configured.');
   }
 
   const url = `${normalizeBaseUrl(config.apiBaseUrl)}/api/mobile/sync`;
   const payload: SyncRequestBody = {
     deviceId: config.deviceId,
-    repo: {
-      owner: config.repoOwner,
-      name: config.repoName,
-      branch: config.repoBranch,
-    },
     snapshot: {
       notes: [...state.recent, ...state.reviewed],
       checkIns: state.checkIns,
@@ -159,14 +144,6 @@ export async function classifyNoteRemotely(
   const requestBody: ClassifyRequestBody = {
     note,
   };
-
-  if (config.repoOwner || config.repoName) {
-    requestBody.repo = {
-      owner: config.repoOwner,
-      name: config.repoName,
-      branch: config.repoBranch,
-    };
-  }
 
   const response = await postJson<ClassifyResponseBody>(url, requestBody);
 

@@ -14,9 +14,6 @@
     },
     "api/mobile/sync.ts": {
       "maxDuration": 300
-    },
-    "api/github/webhook.ts": {
-      "maxDuration": 60
     }
   }
 }

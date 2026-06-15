@@ -5,10 +5,10 @@ import * as Linking from 'expo-linking';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect } from 'react';
 import 'react-native-reanimated';
-import { addUserInteractionListener } from 'expo-widgets';
 
 import { NotesProvider } from '@/context/notes-context';
 import { useColorScheme } from '@/hooks/use-color-scheme';
+import { canUseEchoWidget } from '@/lib/widgets/availability';
 
 export const unstable_settings = {
   anchor: '(tabs)',
@@ -60,6 +60,7 @@ function DeepLinkRouter() {
   const router = useRouter();
 
   useEffect(() => {
+    let isMounted = true;
     void Linking.getInitialURL().then((url) => {
       if (url) routeDeepLink(url, router);
     });
@@ -68,13 +69,24 @@ function DeepLinkRouter() {
       routeDeepLink(event.url, router);
     });
 
-    const widgetSubscription = addUserInteractionListener((event) => {
-      routeDeepLink(event.target, router);
-    });
+    let widgetSubscription: { remove: () => void } | null = null;
+    if (canUseEchoWidget()) {
+      void import('expo-widgets')
+        .then(({ addUserInteractionListener }) => {
+          if (!isMounted) return;
+          widgetSubscription = addUserInteractionListener((event: { target: string }) => {
+            routeDeepLink(event.target, router);
+          });
+        })
+        .catch(() => {
+          // Widgets are unavailable in some non-widget dev contexts.
+        });
+    }
 
     return () => {
+      isMounted = false;
       linkSubscription.remove();
-      widgetSubscription.remove();
+      widgetSubscription?.remove();
     };
   }, [router]);
 

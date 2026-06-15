@@ -1,7 +1,7 @@
 import type { VercelResponse } from '@vercel/node';
 
 const DEFAULT_ALLOWED_HEADERS =
-  'Content-Type, Authorization, X-GitHub-Event, X-GitHub-Delivery, X-Hub-Signature-256';
+  'Content-Type, Authorization';
 
 export function applyCors(res: VercelResponse): void {
   res.setHeader('Access-Control-Allow-Origin', '*');

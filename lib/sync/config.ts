@@ -3,7 +3,6 @@ import * as FileSystem from 'expo-file-system/legacy';
 import type { EchoSyncConfig } from '@/lib/sync/types';
 
 const CONFIG_FILE = `${FileSystem.documentDirectory ?? ''}echo-config-v1.json`;
-const DEFAULT_BRANCH = 'main';
 
 type PartialConfig = Partial<EchoSyncConfig>;
 
@@ -20,9 +19,6 @@ function createDeviceId(): string {
 function defaultConfig(): EchoSyncConfig {
   return {
     apiBaseUrl: trimEnv(process.env.EXPO_PUBLIC_ECHO_API_URL),
-    repoOwner: trimEnv(process.env.EXPO_PUBLIC_ECHO_GITHUB_OWNER),
-    repoName: trimEnv(process.env.EXPO_PUBLIC_ECHO_GITHUB_REPO),
-    repoBranch: trimEnv(process.env.EXPO_PUBLIC_ECHO_GITHUB_BRANCH) ?? DEFAULT_BRANCH,
     deviceId: createDeviceId(),
     syncEnabled: true,
     aiCategorizationEnabled: true,
@@ -35,14 +31,6 @@ function normalizeConfig(input: PartialConfig | null | undefined): EchoSyncConfi
   return {
     apiBaseUrl:
       typeof input?.apiBaseUrl === 'string' ? input.apiBaseUrl.trim() || null : defaults.apiBaseUrl,
-    repoOwner:
-      typeof input?.repoOwner === 'string' ? input.repoOwner.trim() || null : defaults.repoOwner,
-    repoName:
-      typeof input?.repoName === 'string' ? input.repoName.trim() || null : defaults.repoName,
-    repoBranch:
-      typeof input?.repoBranch === 'string' && input.repoBranch.trim().length > 0
-        ? input.repoBranch.trim()
-        : defaults.repoBranch,
     deviceId:
       typeof input?.deviceId === 'string' && input.deviceId.trim().length > 0
         ? input.deviceId.trim()
@@ -56,17 +44,12 @@ function normalizeConfig(input: PartialConfig | null | undefined): EchoSyncConfi
 }
 
 export function isSyncConfigured(config: EchoSyncConfig): boolean {
-  return Boolean(
-    config.syncEnabled && config.apiBaseUrl && config.repoOwner && config.repoName && config.deviceId
-  );
+  return Boolean(config.syncEnabled && config.apiBaseUrl && config.deviceId);
 }
 
 export function syncPendingReason(config: EchoSyncConfig): string | null {
   if (!config.syncEnabled) return 'Sync is disabled on this device.';
   if (!config.apiBaseUrl) return 'Set EXPO_PUBLIC_ECHO_API_URL to reach your backend.';
-  if (!config.repoOwner || !config.repoName) {
-    return 'Set EXPO_PUBLIC_ECHO_GITHUB_OWNER and EXPO_PUBLIC_ECHO_GITHUB_REPO.';
-  }
   return null;
 }
 

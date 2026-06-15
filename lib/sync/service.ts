@@ -1,5 +1,5 @@
 import type { CheckIn, DeletedNote, Note, NotesState } from '@/lib/notes/types';
-import { classifyNoteRemotely, shortenWidgetNoteRemotely, syncVaultSnapshot } from '@/lib/sync/client';
+import { classifyNoteRemotely, shortenWidgetNoteRemotely, syncRemoteSnapshot } from '@/lib/sync/client';
 import { isSyncConfigured, loadSyncConfig } from '@/lib/sync/config';
 import type { RemoteNoteClassification, RemoteWidgetShortening, SyncResult } from '@/lib/sync/types';
 
@@ -117,13 +117,13 @@ export async function classifyNoteViaBackend(
   return classifyNoteRemotely(config, note);
 }
 
-export async function runVaultSync(state: NotesState): Promise<SyncResult> {
+export async function runSupabaseSync(state: NotesState): Promise<SyncResult> {
   const config = await loadSyncConfig();
   if (!isSyncConfigured(config)) {
     throw new Error('Sync is not configured.');
   }
 
-  const result = await syncVaultSnapshot(config, state);
+  const result = await syncRemoteSnapshot(config, state);
   return {
     ...result,
     state: mergeSyncedState(state, result),

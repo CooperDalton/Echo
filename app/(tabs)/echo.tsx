@@ -121,7 +121,6 @@ export default function EchoScreen() {
     deleteCustomBucketDraft,
     upsertStandingMessage,
     deleteStandingMessage,
-    syncConfig,
     syncStatus,
     syncNow,
   } = useNotes();
@@ -796,18 +795,13 @@ export default function EchoScreen() {
             <View style={styles.syncCardHeader}>
               <View style={{ flex: 1, gap: 4 }}>
                 <ThemedText type="subtitle" style={{ fontSize: 18 }}>
-                  GitHub Sync
+                  Supabase Sync
                 </ThemedText>
                 <ThemedText style={{ color: palette.muted }}>
                   {syncStatus.lastSyncedAt
                     ? `Last synced ${new Date(syncStatus.lastSyncedAt).toLocaleString()}`
-                    : syncStatus.pendingReason ?? 'Ready to sync your local vault snapshot.'}
+                    : syncStatus.pendingReason ?? 'Ready to sync your notes.'}
                 </ThemedText>
-                {syncConfig?.repoOwner && syncConfig.repoName ? (
-                  <ThemedText style={{ color: palette.muted, fontSize: 12 }}>
-                    {`${syncConfig.repoOwner}/${syncConfig.repoName} (${syncConfig.repoBranch})`}
-                  </ThemedText>
-                ) : null}
                 {syncStatus.lastError ? (
                   <ThemedText style={{ color: '#C44E4E', fontSize: 12 }}>
                     {syncStatus.lastError}
