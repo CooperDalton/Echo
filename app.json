@@ -48,15 +48,44 @@
               "name": "EchoWidget",
               "displayName": "Echo",
               "description": "Quietly resurfaces thoughts you asked Echo to remember.",
-              "supportedFamilies": ["systemSmall", "systemMedium", "systemLarge"]
+              "supportedFamilies": [
+                "systemSmall",
+                "systemMedium",
+                "systemLarge"
+              ]
             }
           ]
         }
-      ]
+      ],
+      "expo-font",
+      "expo-web-browser"
     ],
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": true
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "build": {
+          "experimental": {
+            "ios": {
+              "appExtensions": [
+                {
+                  "targetName": "ExpoWidgetsTarget",
+                  "bundleIdentifier": "com.cooperdalton.echo.ExpoWidgetsTarget",
+                  "entitlements": {
+                    "com.apple.security.application-groups": [
+                      "group.com.cooperdalton.echo"
+                    ]
+                  }
+                }
+              ]
+            }
+          }
+        },
+        "projectId": "1d8d6a62-611a-4e43-8a41-6bac1a367c0d"
+      }
     }
   }
 }
