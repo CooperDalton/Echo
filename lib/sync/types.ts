@@ -2,6 +2,7 @@ import type { CheckIn, DeletedNote, Note, NotesState } from '@/lib/notes/types';
 
 export type EchoSyncConfig = {
   apiBaseUrl: string | null;
+  apiToken: string | null;
   deviceId: string;
   syncEnabled: boolean;
   aiCategorizationEnabled: boolean;

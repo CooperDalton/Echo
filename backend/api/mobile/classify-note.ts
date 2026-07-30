@@ -2,6 +2,7 @@ import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { z } from 'zod';
 
 import { classifyNote } from '../../src/openai';
+import { requireApiToken } from '../_lib/auth';
 import { classifyRequestSchema } from '../_lib/schemas';
 import { handleOptions, sendError, sendJson } from '../_lib/http';
 
@@ -23,6 +24,7 @@ export default async function handler(
     sendError(res, 405, 'Method not allowed.');
     return;
   }
+  if (!requireApiToken(req, res)) return;
 
   try {
     const parsed = classifyRequestSchema.parse(req.body);

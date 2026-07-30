@@ -13,6 +13,7 @@ import { AppState, type AppStateStatus } from 'react-native';
 import * as Notifications from 'expo-notifications';
 
 import { classifyNote } from '@/lib/notes/classify-note';
+import { canSendNotifications } from '@/lib/notifications/permissions';
 import {
   createCheckInFilePath,
   createNoteFilePath,
@@ -28,7 +29,6 @@ import {
   type CheckInEmotion,
   type CheckInKind,
   type DeletedNote,
-  type EchoSchedule,
   type Note,
   type NotesState,
   type StandingMessage,
@@ -38,7 +38,7 @@ import { loadSyncConfig, syncPendingReason } from '@/lib/sync/config';
 import { runSupabaseSync, shortenWidgetNoteViaBackend } from '@/lib/sync/service';
 import type { EchoSyncConfig, SyncStatus } from '@/lib/sync/types';
 import { compactWidgetText, WIDGET_TEXT_LIMIT } from '@/lib/widgets/entries';
-import { createEchoScheduleForNote } from '@/lib/widgets/schedule';
+import { createEchoScheduleForNote, reviewEchoSchedule } from '@/lib/widgets/schedule';
 import { updateEchoWidget } from '@/lib/widgets/update';
 
 type NotesContextValue = {
@@ -52,9 +52,10 @@ type NotesContextValue = {
   syncConfig: EchoSyncConfig | null;
   syncStatus: SyncStatus;
   addRecentNote: (body: string, options?: { echoEnabled?: boolean }) => void;
+  updateNote: (noteId: string, body: string, options?: { echoEnabled?: boolean }) => void;
   addCheckIn: (input: AddCheckInInput) => void;
   updateCheckIn: (checkInId: string, input: UpdateCheckInInput) => void;
-  markRecentAsReviewed: (noteId: string) => void;
+  markNoteAsReviewed: (noteId: string) => void;
   deleteRecentNote: (noteId: string) => void;
   deleteReviewedNote: (noteId: string) => void;
   addCustomBucketDraft: (draft: BucketDraft) => void;
@@ -106,7 +107,7 @@ function isSyncStale(lastSyncedAt: string | null): boolean {
 async function notifySyncFailure(message: string): Promise<void> {
   try {
     const permissions = await Notifications.getPermissionsAsync();
-    if (!permissions.granted) return;
+    if (!canSendNotifications(permissions)) return;
 
     await Notifications.scheduleNotificationAsync({
       identifier: SYNC_FAILURE_NOTIFICATION_ID,
@@ -174,21 +175,6 @@ function createCheckIn(input: AddCheckInInput): CheckIn {
   return {
     ...checkIn,
     filePath: createCheckInFilePath(checkIn),
-  };
-}
-
-function reviewEchoSchedule(echo: EchoSchedule): EchoSchedule {
-  const reviewedAt = new Date();
-  const occurrenceCount = Math.min(echo.scheduledDates.length, echo.occurrenceCount + 1);
-  const nextDate = echo.scheduledDates[occurrenceCount] ?? echo.scheduledDates.at(-1);
-
-  return {
-    ...echo,
-    state: 'reviewed',
-    lastReviewedAt: reviewedAt.toISOString(),
-    nextDueAt: nextDate ? new Date(`${nextDate}T09:00:00`).toISOString() : echo.nextDueAt,
-    intervalDays: echo.intervalDays,
-    occurrenceCount,
   };
 }
 
@@ -492,6 +478,59 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     [commitState, markDirtyAndScheduleSync, queueClassification, queueWidgetShortening]
   );
 
+  const updateNote = useCallback(
+    (noteId: string, body: string, options?: { echoEnabled?: boolean }) => {
+      const trimmed = body.trim();
+      if (!trimmed) return;
+
+      const existingNotes = [...stateRef.current.recent, ...stateRef.current.reviewed];
+      const existing = existingNotes.find((note) => note.id === noteId);
+      if (!existing) return;
+
+      const updatedAt = new Date().toISOString();
+      const echoEnabled = options?.echoEnabled ?? existing.echo.enabled;
+      const echo =
+        echoEnabled && !existing.echo.enabled
+          ? createEchoScheduleForNote(
+              existing.id,
+              updatedAt,
+              existingNotes.filter((note) => note.id !== existing.id)
+            )
+          : {
+              ...existing.echo,
+              enabled: echoEnabled,
+            };
+      const compactBody = trimmed.replace(/\s+/g, ' ').trim();
+      const updatedNote: Note = {
+        ...existing,
+        body: trimmed,
+        title: createNoteTitle(trimmed),
+        updatedAt,
+        bucket: null,
+        classificationStatus: echoEnabled ? 'classified' : 'pending',
+        classificationMethod: 'unknown',
+        classificationConfidence: null,
+        widgetText: compactBody.length <= WIDGET_TEXT_LIMIT ? trimmed : null,
+        echo,
+      };
+
+      commitState((prev) => {
+        const recent = prev.recent.filter((note) => note.id !== noteId);
+        const reviewed = prev.reviewed.filter((note) => note.id !== noteId);
+
+        return updatedNote.echo.state === 'reviewed'
+          ? { ...prev, recent, reviewed: [updatedNote, ...reviewed] }
+          : { ...prev, recent: [updatedNote, ...recent], reviewed };
+      });
+      if (!updatedNote.echo.enabled) {
+        queueClassification(updatedNote);
+      }
+      queueWidgetShortening(updatedNote);
+      markDirtyAndScheduleSync();
+    },
+    [commitState, markDirtyAndScheduleSync, queueClassification, queueWidgetShortening]
+  );
+
   const addCheckIn = useCallback((input: AddCheckInInput) => {
     const checkIn = createCheckIn(input);
     commitState((prev) => ({ ...prev, checkIns: [checkIn, ...prev.checkIns] }));
@@ -522,10 +561,12 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     markDirtyAndScheduleSync();
   }, [commitState, markDirtyAndScheduleSync]);
 
-  const markRecentAsReviewed = useCallback((noteId: string) => {
+  const markNoteAsReviewed = useCallback((noteId: string) => {
     commitState((prev) => {
-      const note = prev.recent.find((item) => item.id === noteId);
-      if (!note) return prev;
+      const note =
+        prev.recent.find((item) => item.id === noteId) ??
+        prev.reviewed.find((item) => item.id === noteId);
+      if (!note || !note.echo.enabled) return prev;
       const reviewedNote = {
         ...note,
         updatedAt: new Date().toISOString(),
@@ -535,7 +576,10 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       return {
         ...prev,
         recent: prev.recent.filter((item) => item.id !== noteId),
-        reviewed: [reviewedNote, ...prev.reviewed],
+        reviewed: [
+          reviewedNote,
+          ...prev.reviewed.filter((item) => item.id !== noteId),
+        ],
       };
     });
     markDirtyAndScheduleSync();
@@ -742,9 +786,10 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       syncConfig,
       syncStatus,
       addRecentNote,
+      updateNote,
       addCheckIn,
       updateCheckIn,
-      markRecentAsReviewed,
+      markNoteAsReviewed,
       deleteRecentNote,
       deleteReviewedNote,
       addCustomBucketDraft,
@@ -767,9 +812,10 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       syncConfig,
       syncStatus,
       addRecentNote,
+      updateNote,
       addCheckIn,
       updateCheckIn,
-      markRecentAsReviewed,
+      markNoteAsReviewed,
       deleteRecentNote,
       deleteReviewedNote,
       addCustomBucketDraft,

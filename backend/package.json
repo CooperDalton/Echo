@@ -6,9 +6,7 @@
     "node": "22.x"
   },
   "scripts": {
-    "dev": "vercel dev --listen 8787",
     "compile": "tsc -p tsconfig.json",
-    "start": "vercel dev --listen 8787",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "vercel:build": "vercel build"
   },

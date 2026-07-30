@@ -5,8 +5,8 @@ import { SymbolWeight, SymbolViewProps } from 'expo-symbols';
 import { ComponentProps } from 'react';
 import { OpaqueColorValue, type StyleProp, type TextStyle } from 'react-native';
 
-type IconMapping = Record<SymbolViewProps['name'], ComponentProps<typeof MaterialIcons>['name']>;
-type IconSymbolName = keyof typeof MAPPING;
+type SFSymbolName = Extract<SymbolViewProps['name'], string>;
+type MaterialIconName = ComponentProps<typeof MaterialIcons>['name'];
 
 /**
  * Add your SF Symbols to Material Icons mappings here.
@@ -19,6 +19,9 @@ const MAPPING = {
   'chevron.left.forwardslash.chevron.right': 'code',
   'chevron.right': 'chevron-right',
   'chevron.left': 'chevron-left',
+  'chevron.up': 'keyboard-arrow-up',
+  'chevron.down': 'keyboard-arrow-down',
+  xmark: 'close',
   'square.and.pencil': 'edit',
   'checkmark': 'check',
   'checkmark.circle': 'check-circle',
@@ -31,7 +34,9 @@ const MAPPING = {
   'battery.50': 'battery-3-bar',
   'battery.75': 'battery-5-bar',
   'battery.100': 'battery-full',
-} as IconMapping;
+} satisfies Partial<Record<SFSymbolName, MaterialIconName>>;
+
+type IconSymbolName = keyof typeof MAPPING;
 
 /**
  * An icon component that uses native SF Symbols on iOS, and Material Icons on Android and web.

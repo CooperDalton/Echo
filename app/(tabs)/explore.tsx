@@ -95,6 +95,25 @@ function shouldShowBodyOnly(note: Note): boolean {
   return body.length <= 32 || title.length === 0 || body === title;
 }
 
+function formatSyncLabel(
+  isSyncing: boolean,
+  configured: boolean,
+  lastSyncedAt: string | null,
+  lastError: string | null
+): string {
+  if (isSyncing) return 'Syncing…';
+  if (lastError) return 'Sync failed';
+  if (!configured) return 'Sync needs setup';
+  if (!lastSyncedAt) return 'Ready to sync';
+
+  const syncedAt = new Date(lastSyncedAt);
+  if (Number.isNaN(syncedAt.getTime())) return 'Synced';
+  return `Synced ${syncedAt.toLocaleTimeString(undefined, {
+    hour: 'numeric',
+    minute: '2-digit',
+  })}`;
+}
+
 export default function LibraryScreen() {
   const colorScheme = useColorScheme() ?? 'light';
   const insets = useSafeAreaInsets();
@@ -105,9 +124,11 @@ export default function LibraryScreen() {
     recent,
     reviewed,
     bucketPreferences,
-    markRecentAsReviewed,
+    markNoteAsReviewed,
     deleteRecentNote,
     deleteReviewedNote,
+    syncNow,
+    syncStatus,
   } = useNotes();
   const customBuckets = bucketPreferences.customs;
 
@@ -199,6 +220,43 @@ export default function LibraryScreen() {
             { paddingBottom: 28 + insets.bottom, flexGrow: 1 },
           ]}
         >
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Sync notes now"
+            disabled={syncStatus.isSyncing || !syncStatus.configured}
+            onPress={() => {
+              void syncNow();
+            }}
+            style={({ pressed }) => [
+              styles.syncCard,
+              {
+                backgroundColor: palette.surfaceAlt,
+                borderColor: syncStatus.lastError ? '#A82424' : palette.border,
+                opacity:
+                  pressed || syncStatus.isSyncing || !syncStatus.configured ? 0.7 : 1,
+              },
+            ]}
+          >
+            <View style={styles.syncCopy}>
+              <ThemedText style={{ color: palette.text, fontSize: 13, fontWeight: '600' }}>
+                {formatSyncLabel(
+                  syncStatus.isSyncing,
+                  syncStatus.configured,
+                  syncStatus.lastSyncedAt,
+                  syncStatus.lastError
+                )}
+              </ThemedText>
+              {syncStatus.lastError || syncStatus.pendingReason ? (
+                <ThemedText style={{ color: palette.muted, fontSize: 11 }} numberOfLines={1}>
+                  {syncStatus.lastError ?? syncStatus.pendingReason}
+                </ThemedText>
+              ) : null}
+            </View>
+            <ThemedText style={{ color: palette.accent, fontSize: 12, fontWeight: '600' }}>
+              {syncStatus.isSyncing ? 'Please wait' : 'Sync now'}
+            </ThemedText>
+          </Pressable>
+
           <View style={styles.searchRow}>
             <View
               style={[
@@ -414,7 +472,7 @@ export default function LibraryScreen() {
                     }}
                     onSwipeableOpen={(dir) => {
                       if (dir === 'right') {
-                        markRecentAsReviewed(note.id);
+                        markNoteAsReviewed(note.id);
                       } else if (dir === 'left') {
                         deleteRecentNote(note.id);
                       }
@@ -667,6 +725,21 @@ const styles = StyleSheet.create({
   section: {
     gap: 12,
     overflow: 'visible',
+  },
+  syncCard: {
+    minHeight: 48,
+    borderWidth: 1,
+    borderRadius: 16,
+    paddingHorizontal: 14,
+    paddingVertical: 9,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
+  syncCopy: {
+    flex: 1,
+    gap: 2,
   },
   noteStack: {
     gap: 12,

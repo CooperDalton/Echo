@@ -18,6 +18,7 @@ import { IconSymbol } from '@/components/ui/icon-symbol';
 import { Colors, Fonts } from '@/constants/theme';
 import { useNotes } from '@/context/notes-context';
 import { useColorScheme } from '@/hooks/use-color-scheme';
+import { canSendNotifications } from '@/lib/notifications/permissions';
 import { CHECK_IN_EMOTIONS, type CheckIn, type CheckInEmotion } from '@/lib/notes/types';
 
 const EMOTION_LABELS: Record<CheckInEmotion, string> = {
@@ -121,11 +122,11 @@ export default function CheckInScreen() {
     void (async () => {
       try {
         const currentPermissions = await Notifications.getPermissionsAsync();
-        const finalPermissions = currentPermissions.granted
+        const finalPermissions = canSendNotifications(currentPermissions)
           ? currentPermissions
           : await Notifications.requestPermissionsAsync();
 
-        if (!isMounted || !finalPermissions.granted) return;
+        if (!isMounted || !canSendNotifications(finalPermissions)) return;
 
         await Notifications.cancelScheduledNotificationAsync(EVENING_CHECK_IN_NOTIFICATION_ID);
         await Notifications.scheduleNotificationAsync({

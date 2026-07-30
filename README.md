@@ -16,6 +16,7 @@ Set this in your Expo environment:
 
 ```bash
 EXPO_PUBLIC_ECHO_API_URL=https://your-backend.example.com
+EXPO_PUBLIC_ECHO_API_TOKEN=replace-with-a-long-random-token
 ```
 
 Set these in `backend/.env` for local development, or add them as Vercel project environment variables when deployed:
@@ -23,12 +24,16 @@ Set these in `backend/.env` for local development, or add them as Vercel project
 ```bash
 PORT=8787
 OPENAI_API_KEY=sk-...
-ECHO_OPENAI_MODEL=gpt-5.4-nano
+ECHO_OPENAI_MODEL=gpt-5-nano
+ECHO_API_TOKEN=replace-with-the-same-long-random-token
 SUPABASE_URL=https://ufggqelbtqldxaokdsds.supabase.co
 SUPABASE_SERVICE_ROLE_KEY=...
 ```
 
 Do not expose `SUPABASE_SERVICE_ROLE_KEY` to the Expo app.
+`ECHO_API_TOKEN` protects the personal backend from anonymous reads, writes, and
+OpenAI usage. The Expo token is embedded in personal builds, so rotate both
+values if a build is ever distributed outside your own devices.
 
 ## Supabase Schema
 
@@ -76,7 +81,7 @@ Response:
   "bucket": "Research",
   "confidence": 0.86,
   "method": "ai",
-  "model": "gpt-5.4-nano"
+  "model": "gpt-5-nano"
 }
 ```
 
@@ -98,6 +103,11 @@ Request:
   }
 }
 ```
+
+### `GET /api/mobile/status`
+
+Requires `Authorization: Bearer <ECHO_API_TOKEN>` and verifies that the backend
+can reach Supabase without returning note contents.
 
 Response:
 
@@ -143,7 +153,8 @@ npm run backend:dev
 To deploy on Vercel:
 
 1. Create a Vercel project rooted at `backend/`.
-2. Set `OPENAI_API_KEY`, `ECHO_OPENAI_MODEL`, `SUPABASE_URL`, and `SUPABASE_SERVICE_ROLE_KEY`.
+2. Set `OPENAI_API_KEY`, `ECHO_OPENAI_MODEL`, `ECHO_API_TOKEN`, `SUPABASE_URL`,
+   and `SUPABASE_SERVICE_ROLE_KEY`.
 3. Deploy.
 4. Point `EXPO_PUBLIC_ECHO_API_URL` at the deployed Vercel URL.
 

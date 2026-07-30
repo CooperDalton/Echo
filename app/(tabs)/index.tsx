@@ -17,7 +17,7 @@ export default function CaptureScreen() {
   const router = useRouter();
   const navigation = useNavigation();
   const palette = Colors[colorScheme];
-  const { addRecentNote } = useNotes();
+  const { addRecentNote, recent, reviewed, updateNote } = useNotes();
   const destructiveOutlineColor = colorScheme === 'dark' ? '#FF8E8E' : '#A82424';
   const destructiveFillColor = colorScheme === 'dark' ? '#C96F6F' : '#F2B6B6';
   const destructiveButtonBg = colorScheme === 'dark' ? '#3A2424' : '#FDE8E8';
@@ -55,6 +55,13 @@ export default function CaptureScreen() {
 
   const inStandingMode = standingMode === '1';
   const hasExistingNoteId = typeof noteId === 'string' && noteId.length > 0;
+  const existingNote = useMemo(
+    () =>
+      hasExistingNoteId
+        ? [...recent, ...reviewed].find((note) => note.id === noteId) ?? null
+        : null,
+    [hasExistingNoteId, noteId, recent, reviewed]
+  );
   const parsedStandingId = typeof standingId === 'string' ? Number.parseInt(standingId, 10) : NaN;
   const hasStandingId = Number.isInteger(parsedStandingId) && parsedStandingId >= 0;
   const returnPath =
@@ -123,13 +130,24 @@ export default function CaptureScreen() {
       return;
     }
 
-    // Existing note opens are currently read-only in Capture.
-    if (!hasExistingNoteId) {
+    if (hasExistingNoteId) {
+      updateNote(noteId, trimmed, {
+        echoEnabled: echoEnabled || existingNote?.echo.enabled === true,
+      });
+    } else {
       addRecentNote(trimmed, { echoEnabled });
     }
 
     goBack();
-  }, [addRecentNote, goBack, hasExistingNoteId, text]);
+  }, [
+    addRecentNote,
+    existingNote?.echo.enabled,
+    goBack,
+    hasExistingNoteId,
+    noteId,
+    text,
+    updateNote,
+  ]);
 
   // Ensure tapping the Capture tab always starts a fresh note (no params)
   useEffect(() => {
@@ -162,7 +180,7 @@ export default function CaptureScreen() {
             <IconSymbol name="chevron.left" size={22} color={palette.text} />
           </Pressable>
           <View style={styles.actionsTop}>
-            {!editingStanding ? (
+            {!editingStanding && !existingNote?.echo.enabled ? (
               <Pressable
                 style={({ pressed }) => [
                   styles.primaryButton,

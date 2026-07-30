@@ -19,6 +19,7 @@ function createDeviceId(): string {
 function defaultConfig(): EchoSyncConfig {
   return {
     apiBaseUrl: trimEnv(process.env.EXPO_PUBLIC_ECHO_API_URL),
+    apiToken: trimEnv(process.env.EXPO_PUBLIC_ECHO_API_TOKEN),
     deviceId: createDeviceId(),
     syncEnabled: true,
     aiCategorizationEnabled: true,
@@ -31,6 +32,8 @@ function normalizeConfig(input: PartialConfig | null | undefined): EchoSyncConfi
   return {
     apiBaseUrl:
       typeof input?.apiBaseUrl === 'string' ? input.apiBaseUrl.trim() || null : defaults.apiBaseUrl,
+    apiToken:
+      typeof input?.apiToken === 'string' ? input.apiToken.trim() || null : defaults.apiToken,
     deviceId:
       typeof input?.deviceId === 'string' && input.deviceId.trim().length > 0
         ? input.deviceId.trim()
@@ -44,12 +47,18 @@ function normalizeConfig(input: PartialConfig | null | undefined): EchoSyncConfi
 }
 
 export function isSyncConfigured(config: EchoSyncConfig): boolean {
-  return Boolean(config.syncEnabled && config.apiBaseUrl && config.deviceId);
+  return Boolean(
+    config.syncEnabled &&
+      config.apiBaseUrl &&
+      config.apiToken &&
+      config.deviceId
+  );
 }
 
 export function syncPendingReason(config: EchoSyncConfig): string | null {
   if (!config.syncEnabled) return 'Sync is disabled on this device.';
   if (!config.apiBaseUrl) return 'Set EXPO_PUBLIC_ECHO_API_URL to reach your backend.';
+  if (!config.apiToken) return 'Set EXPO_PUBLIC_ECHO_API_TOKEN to authenticate with your backend.';
   return null;
 }
 

@@ -2,6 +2,7 @@ import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { z } from 'zod';
 
 import { shortenWidgetNote } from '../../src/openai';
+import { requireApiToken } from '../_lib/auth';
 import { handleOptions, sendError, sendJson } from '../_lib/http';
 import { shortenWidgetNoteRequestSchema } from '../_lib/schemas';
 
@@ -23,6 +24,7 @@ export default async function handler(
     sendError(res, 405, 'Method not allowed.');
     return;
   }
+  if (!requireApiToken(req, res)) return;
 
   try {
     const parsed = shortenWidgetNoteRequestSchema.parse(req.body);

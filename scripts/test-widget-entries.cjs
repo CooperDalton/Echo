@@ -85,6 +85,8 @@ const {
 } = loadTs('lib/widgets/entries.ts');
 
 const { DEFAULT_WIDGET_PREFERENCES } = loadTs('lib/notes/types.ts');
+const { reviewEchoSchedule } = loadTs('lib/widgets/schedule.ts');
+const { extractBearerToken, isApiTokenValid } = loadTs('backend/src/auth.ts');
 
 function note(id, nextDueAt, overrides = {}) {
   return {
@@ -243,4 +245,54 @@ test('timeline includes future due-date entries', () => {
     timeline[1].props.entries.map((entry) => entry.id),
     ['echo-future']
   );
+});
+
+test('reviewing an echo advances to the next scheduled occurrence', () => {
+  const reviewed = reviewEchoSchedule(
+    {
+      enabled: true,
+      state: 'new',
+      lastReviewedAt: null,
+      nextDueAt: '2026-06-16T09:00:00.000Z',
+      intervalDays: 1,
+      ease: 2.5,
+      occurrenceCount: 0,
+      scheduledDates: ['2026-06-16', '2026-06-22'],
+    },
+    new Date('2026-06-16T12:00:00.000Z')
+  );
+
+  assert.equal(reviewed.enabled, true);
+  assert.equal(reviewed.state, 'reviewed');
+  assert.equal(reviewed.occurrenceCount, 1);
+  assert.equal(reviewed.nextDueAt, new Date('2026-06-22T09:00:00').toISOString());
+});
+
+test('reviewing the final echo completes its schedule', () => {
+  const reviewed = reviewEchoSchedule(
+    {
+      enabled: true,
+      state: 'reviewed',
+      lastReviewedAt: '2026-06-16T12:00:00.000Z',
+      nextDueAt: '2026-06-22T09:00:00.000Z',
+      intervalDays: 1,
+      ease: 2.5,
+      occurrenceCount: 1,
+      scheduledDates: ['2026-06-16', '2026-06-22'],
+    },
+    new Date('2026-06-22T12:00:00.000Z')
+  );
+
+  assert.equal(reviewed.enabled, false);
+  assert.equal(reviewed.occurrenceCount, 2);
+  assert.equal(reviewed.nextDueAt, '2026-06-22T09:00:00.000Z');
+});
+
+test('API token authentication accepts only the configured bearer token', () => {
+  const expected = 'a'.repeat(32);
+
+  assert.equal(extractBearerToken(`Bearer ${expected}`), expected);
+  assert.equal(isApiTokenValid(expected, expected), true);
+  assert.equal(isApiTokenValid('b'.repeat(32), expected), false);
+  assert.equal(isApiTokenValid(null, expected), false);
 });

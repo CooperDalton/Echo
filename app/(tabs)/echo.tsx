@@ -672,7 +672,12 @@ export default function EchoScreen() {
             {todayEchoes.map((echo, index) => (
               <Pressable
                 key={`${echo.id}-${index}`}
-                onPress={() => router.push({ pathname: '/', params: { text: echo.text, returnTo: '/echo', noteId: echo.id } })}
+                onPress={() =>
+                  router.push({
+                    pathname: '/note/[noteId]',
+                    params: { noteId: echo.id },
+                  })
+                }
                 style={({ pressed }) => [
                   styles.echoCard,
                   {
@@ -937,8 +942,8 @@ export default function EchoScreen() {
                     onLayout={onQueueRowLayout(note.id)}
                     onPress={() =>
                       router.push({
-                        pathname: '/',
-                        params: { text: note.body, returnTo: '/echo', noteId: note.id },
+                        pathname: '/note/[noteId]',
+                        params: { noteId: note.id },
                       })
                     }
                     style={({ pressed }) => [

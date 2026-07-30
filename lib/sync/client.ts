@@ -54,11 +54,16 @@ function normalizeBaseUrl(value: string): string {
   return value.endsWith('/') ? value.slice(0, -1) : value;
 }
 
-async function postJson<TResponse>(url: string, body: unknown): Promise<TResponse> {
+async function postJson<TResponse>(
+  url: string,
+  body: unknown,
+  apiToken: string
+): Promise<TResponse> {
   const response = await fetch(url, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
+      Authorization: `Bearer ${apiToken}`,
     },
     body: JSON.stringify(body),
   });
@@ -74,7 +79,7 @@ export async function syncRemoteSnapshot(
   config: EchoSyncConfig,
   state: NotesState
 ): Promise<SyncResult> {
-  if (!config.apiBaseUrl) {
+  if (!config.apiBaseUrl || !config.apiToken) {
     throw new Error('Sync is not configured.');
   }
 
@@ -90,7 +95,7 @@ export async function syncRemoteSnapshot(
     },
   };
 
-  const response = await postJson<SyncResponseBody>(url, payload);
+  const response = await postJson<SyncResponseBody>(url, payload, config.apiToken);
 
   return {
     state: {
@@ -117,13 +122,17 @@ export async function shortenWidgetNoteRemotely(
   note: Pick<Note, 'id' | 'title' | 'body'>,
   maxLength: number
 ): Promise<RemoteWidgetShortening | null> {
-  if (!config.apiBaseUrl || !config.aiCategorizationEnabled) return null;
+  if (!config.apiBaseUrl || !config.apiToken || !config.aiCategorizationEnabled) return null;
 
   const url = `${normalizeBaseUrl(config.apiBaseUrl)}/api/mobile/shorten-widget-note`;
-  const response = await postJson<ShortenWidgetNoteResponseBody>(url, {
-    note,
-    maxLength,
-  });
+  const response = await postJson<ShortenWidgetNoteResponseBody>(
+    url,
+    {
+      note,
+      maxLength,
+    },
+    config.apiToken
+  );
 
   if (typeof response.widgetText !== 'string' || response.widgetText.trim().length === 0) {
     return null;
@@ -140,7 +149,7 @@ export async function classifyNoteRemotely(
   note: Pick<Note, 'id' | 'title' | 'body' | 'createdAt' | 'updatedAt'>,
   buckets: BucketDraft[]
 ): Promise<RemoteNoteClassification | null> {
-  if (!config.apiBaseUrl || !config.aiCategorizationEnabled) return null;
+  if (!config.apiBaseUrl || !config.apiToken || !config.aiCategorizationEnabled) return null;
   if (buckets.length === 0) return null;
 
   const url = `${normalizeBaseUrl(config.apiBaseUrl)}/api/mobile/classify-note`;
@@ -149,7 +158,7 @@ export async function classifyNoteRemotely(
     buckets,
   };
 
-  const response = await postJson<ClassifyResponseBody>(url, requestBody);
+  const response = await postJson<ClassifyResponseBody>(url, requestBody, config.apiToken);
 
   if (!response.bucket || !buckets.some((bucket) => bucket.name === response.bucket)) return null;
   if (typeof response.title !== 'string' || response.title.trim().length === 0) return null;

@@ -119,6 +119,28 @@ export function normalizeEchoSchedule(
   return createEchoScheduleForNote(noteId, createdAt, existingNotes);
 }
 
+export function reviewEchoSchedule(
+  echo: EchoSchedule,
+  reviewedAt = new Date()
+): EchoSchedule {
+  const occurrenceCount = Math.min(
+    echo.scheduledDates.length,
+    Math.max(0, echo.occurrenceCount) + 1
+  );
+  const nextDate = echo.scheduledDates[occurrenceCount];
+
+  return {
+    ...echo,
+    enabled: Boolean(nextDate),
+    state: 'reviewed',
+    lastReviewedAt: reviewedAt.toISOString(),
+    nextDueAt: nextDate
+      ? new Date(`${nextDate}T09:00:00`).toISOString()
+      : echo.nextDueAt,
+    occurrenceCount,
+  };
+}
+
 export function todayKey(): string {
   return dateKey(new Date());
 }
