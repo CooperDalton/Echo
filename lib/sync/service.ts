@@ -51,6 +51,31 @@ function mergeCheckIns(local: CheckIn[], remote: CheckIn[]): CheckIn[] {
   return [...map.values()].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 }
 
+function mergeWeeklyReviews(
+  local: NotesState['weeklyReviews'],
+  remote: NotesState['weeklyReviews']
+): NotesState['weeklyReviews'] {
+  const map = new Map<string, NotesState['weeklyReviews'][number]>();
+
+  [...remote, ...local].forEach((review) => {
+    const existing = map.get(review.id);
+    if (!existing || compareIsoDates(review.updatedAt, existing.updatedAt) > 0) {
+      map.set(review.id, review);
+    }
+  });
+
+  return [...map.values()].sort((a, b) => b.scheduledFor.localeCompare(a.scheduledFor));
+}
+
+function mergeWeeklyReviewPreferences(
+  local: NotesState['weeklyReviewPreferences'],
+  remote: NotesState['weeklyReviewPreferences']
+): NotesState['weeklyReviewPreferences'] {
+  if (!local.updatedAt) return remote;
+  if (!remote.updatedAt) return local;
+  return compareIsoDates(local.updatedAt, remote.updatedAt) >= 0 ? local : remote;
+}
+
 function mergeDeletedNotes(local: DeletedNote[], remote: DeletedNote[]): DeletedNote[] {
   const map = new Map<string, DeletedNote>();
 
@@ -105,6 +130,14 @@ function mergeSyncedState(localState: NotesState, remoteResult: SyncResult): Not
         ? localState.standingMessages
         : remoteResult.state.standingMessages,
     widgetPreferences: localState.widgetPreferences,
+    weeklyReviews: mergeWeeklyReviews(
+      localState.weeklyReviews,
+      remoteResult.state.weeklyReviews
+    ),
+    weeklyReviewPreferences: mergeWeeklyReviewPreferences(
+      localState.weeklyReviewPreferences,
+      remoteResult.state.weeklyReviewPreferences
+    ),
   };
 }
 

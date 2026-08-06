@@ -35,6 +35,8 @@ export type SyncSnapshot = {
   deletedNotes: DeletedNote[];
   bucketPreferences: NotesState['bucketPreferences'];
   standingMessages: NotesState['standingMessages'];
+  weeklyReviews: NotesState['weeklyReviews'];
+  weeklyReviewPreferences: NotesState['weeklyReviewPreferences'];
 };
 
 export type SyncResult = {
@@ -45,5 +47,7 @@ export type SyncResult = {
     pushedCheckIns: number;
     pulledNotes: number;
     pulledCheckIns: number;
+    pushedWeeklyReviews: number;
+    pulledWeeklyReviews: number;
   };
 };

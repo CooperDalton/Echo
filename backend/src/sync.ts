@@ -1,4 +1,13 @@
-import type { BucketPreferences, CheckIn, DeletedNote, Note, NotesState, StandingMessage } from './contracts';
+import type {
+  BucketPreferences,
+  CheckIn,
+  DeletedNote,
+  Note,
+  NotesState,
+  StandingMessage,
+  WeeklyReview,
+  WeeklyReviewPreferences,
+} from './contracts';
 import { supabase } from './supabase';
 
 type SyncSummary = {
@@ -6,6 +15,8 @@ type SyncSummary = {
   pushedCheckIns: number;
   pulledNotes: number;
   pulledCheckIns: number;
+  pushedWeeklyReviews: number;
+  pulledWeeklyReviews: number;
   storedRows: number;
 };
 
@@ -58,6 +69,34 @@ type StandingMessageRow = {
   updated_at: string;
 };
 
+type WeeklyReviewRow = {
+  id: string;
+  scheduled_for: string;
+  completed_at: string;
+  updated_at: string;
+  reflection: string;
+  next_week_intent: string;
+};
+
+type WeeklyReviewPreferencesRow = {
+  id: 'default';
+  enabled: boolean;
+  weekday: number;
+  hour: number;
+  minute: number;
+  starts_at: string | null;
+  updated_at: string | null;
+};
+
+const DEFAULT_WEEKLY_REVIEW_PREFERENCES: WeeklyReviewPreferences = {
+  enabled: false,
+  weekday: 1,
+  hour: 18,
+  minute: 0,
+  startsAt: null,
+  updatedAt: null,
+};
+
 function compareIsoDates(left: string, right: string): number {
   const leftTime = Date.parse(left);
   const rightTime = Date.parse(right);
@@ -101,6 +140,28 @@ function mergeCheckIns(local: CheckIn[], remote: CheckIn[]): CheckIn[] {
   });
 
   return sortNewestFirst([...map.values()]);
+}
+
+function mergeWeeklyReviews(local: WeeklyReview[], remote: WeeklyReview[]): WeeklyReview[] {
+  const map = new Map<string, WeeklyReview>();
+
+  [...remote, ...local].forEach((review) => {
+    const existing = map.get(review.id);
+    if (!existing || compareIsoDates(review.updatedAt, existing.updatedAt) > 0) {
+      map.set(review.id, review);
+    }
+  });
+
+  return [...map.values()].sort((a, b) => b.scheduledFor.localeCompare(a.scheduledFor));
+}
+
+function mergeWeeklyReviewPreferences(
+  local: WeeklyReviewPreferences,
+  remote: WeeklyReviewPreferences
+): WeeklyReviewPreferences {
+  if (!local.updatedAt) return remote;
+  if (!remote.updatedAt) return local;
+  return compareIsoDates(local.updatedAt, remote.updatedAt) >= 0 ? local : remote;
 }
 
 function mergeDeletedNotes(local: DeletedNote[], remote: DeletedNote[]): DeletedNote[] {
@@ -224,6 +285,42 @@ function standingMessageToRow(message: StandingMessage): StandingMessageRow {
   };
 }
 
+function weeklyReviewFromRow(row: WeeklyReviewRow): WeeklyReview {
+  return {
+    id: row.id,
+    scheduledFor: row.scheduled_for,
+    completedAt: row.completed_at,
+    updatedAt: row.updated_at,
+    reflection: row.reflection,
+    nextWeekIntent: row.next_week_intent,
+  };
+}
+
+function weeklyReviewToRow(review: WeeklyReview): WeeklyReviewRow {
+  return {
+    id: review.id,
+    scheduled_for: review.scheduledFor,
+    completed_at: review.completedAt,
+    updated_at: review.updatedAt,
+    reflection: review.reflection,
+    next_week_intent: review.nextWeekIntent,
+  };
+}
+
+function weeklyReviewPreferencesFromRow(
+  row: WeeklyReviewPreferencesRow | null
+): WeeklyReviewPreferences {
+  if (!row) return DEFAULT_WEEKLY_REVIEW_PREFERENCES;
+  return {
+    enabled: row.enabled,
+    weekday: row.weekday,
+    hour: row.hour,
+    minute: row.minute,
+    startsAt: row.starts_at,
+    updatedAt: row.updated_at,
+  };
+}
+
 async function readTable<T>(table: string, orderColumn: string): Promise<T[]> {
   const { data, error } = await supabase.from(table).select('*').order(orderColumn, {
     ascending: false,
@@ -234,17 +331,28 @@ async function readTable<T>(table: string, orderColumn: string): Promise<T[]> {
 }
 
 async function loadSupabaseSnapshot(): Promise<NotesState> {
-  const [noteRows, checkInRows, deletedNoteRows, bucketPreferencesRows, standingMessageRows] =
+  const [
+    noteRows,
+    checkInRows,
+    deletedNoteRows,
+    bucketPreferencesRows,
+    standingMessageRows,
+    weeklyReviewRows,
+    weeklyReviewPreferencesRows,
+  ] =
     await Promise.all([
       readTable<NoteRow>('notes', 'created_at'),
       readTable<CheckInRow>('check_ins', 'created_at'),
       readTable<DeletedNoteRow>('deleted_notes', 'deleted_at'),
       supabase.from('bucket_preferences').select('*').eq('id', 'default').maybeSingle(),
       supabase.from('standing_messages').select('*').order('created_at', { ascending: true }),
+      readTable<WeeklyReviewRow>('weekly_reviews', 'scheduled_for'),
+      supabase.from('weekly_review_preferences').select('*').eq('id', 'default').maybeSingle(),
     ]);
 
   if (bucketPreferencesRows.error) throw bucketPreferencesRows.error;
   if (standingMessageRows.error) throw standingMessageRows.error;
+  if (weeklyReviewPreferencesRows.error) throw weeklyReviewPreferencesRows.error;
 
   const deletedNotes = deletedNoteRows.map(deletedNoteFromRow);
   const deletedIds = new Set(deletedNotes.map((deletedNote) => deletedNote.id));
@@ -261,6 +369,10 @@ async function loadSupabaseSnapshot(): Promise<NotesState> {
     },
     standingMessages: ((standingMessageRows.data ?? []) as StandingMessageRow[]).map(
       standingMessageFromRow
+    ),
+    weeklyReviews: weeklyReviewRows.map(weeklyReviewFromRow),
+    weeklyReviewPreferences: weeklyReviewPreferencesFromRow(
+      weeklyReviewPreferencesRows.data as WeeklyReviewPreferencesRow | null
     ),
   };
 }
@@ -290,6 +402,7 @@ async function persistSupabaseSnapshot(state: NotesState, deviceId: string): Pro
     'standing_messages',
     state.standingMessages.map(standingMessageToRow)
   );
+  storedRows += await upsertRows('weekly_reviews', state.weeklyReviews.map(weeklyReviewToRow));
 
   const { error: bucketPreferencesError } = await supabase.from('bucket_preferences').upsert(
     {
@@ -299,6 +412,23 @@ async function persistSupabaseSnapshot(state: NotesState, deviceId: string): Pro
     { onConflict: 'id' }
   );
   if (bucketPreferencesError) throw bucketPreferencesError;
+  storedRows += 1;
+
+  const { error: weeklyReviewPreferencesError } = await supabase
+    .from('weekly_review_preferences')
+    .upsert(
+      {
+        id: 'default',
+        enabled: state.weeklyReviewPreferences.enabled,
+        weekday: state.weeklyReviewPreferences.weekday,
+        hour: state.weeklyReviewPreferences.hour,
+        minute: state.weeklyReviewPreferences.minute,
+        starts_at: state.weeklyReviewPreferences.startsAt,
+        updated_at: state.weeklyReviewPreferences.updatedAt,
+      },
+      { onConflict: 'id' }
+    );
+  if (weeklyReviewPreferencesError) throw weeklyReviewPreferencesError;
   storedRows += 1;
 
   const { error: deviceError } = await supabase.from('sync_devices').upsert(
@@ -332,6 +462,11 @@ export async function syncSupabaseSnapshot(
   const mergedCheckIns = mergeCheckIns(state.checkIns, remote.checkIns);
   const mergedStandingMessages =
     state.standingMessages.length > 0 ? state.standingMessages : remote.standingMessages;
+  const mergedWeeklyReviews = mergeWeeklyReviews(state.weeklyReviews, remote.weeklyReviews);
+  const mergedWeeklyReviewPreferences = mergeWeeklyReviewPreferences(
+    state.weeklyReviewPreferences,
+    remote.weeklyReviewPreferences
+  );
 
   const mergedState: NotesState = {
     recent: mergedNotes.filter((note) => note.echo.state !== 'reviewed'),
@@ -340,6 +475,8 @@ export async function syncSupabaseSnapshot(
     deletedNotes: mergedDeletedNotes,
     bucketPreferences: mergedBucketPreferences,
     standingMessages: mergedStandingMessages,
+    weeklyReviews: mergedWeeklyReviews,
+    weeklyReviewPreferences: mergedWeeklyReviewPreferences,
   };
   const storedRows = await persistSupabaseSnapshot(mergedState, deviceId);
 
@@ -350,6 +487,8 @@ export async function syncSupabaseSnapshot(
       pushedCheckIns: state.checkIns.length,
       pulledNotes: remote.recent.length + remote.reviewed.length,
       pulledCheckIns: remote.checkIns.length,
+      pushedWeeklyReviews: state.weeklyReviews.length,
+      pulledWeeklyReviews: remote.weeklyReviews.length,
       storedRows,
     },
   };

@@ -10,6 +10,8 @@ const TABLES = [
   'deleted_notes',
   'bucket_preferences',
   'standing_messages',
+  'weekly_reviews',
+  'weekly_review_preferences',
 ] as const;
 
 export default async function handler(

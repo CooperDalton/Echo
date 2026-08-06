@@ -1,4 +1,5 @@
 import * as Notifications from 'expo-notifications';
+import { DateTimePicker } from '@expo/ui/community/datetime-picker';
 import { useRouter } from 'expo-router';
 import { useEffect, useMemo, useState } from 'react';
 import {
@@ -18,8 +19,17 @@ import { IconSymbol } from '@/components/ui/icon-symbol';
 import { Colors, Fonts } from '@/constants/theme';
 import { useNotes } from '@/context/notes-context';
 import { useColorScheme } from '@/hooks/use-color-scheme';
-import { canSendNotifications } from '@/lib/notifications/permissions';
 import { CHECK_IN_EMOTIONS, type CheckIn, type CheckInEmotion } from '@/lib/notes/types';
+import { canSendNotifications } from '@/lib/notifications/permissions';
+import {
+  cancelWeeklyReviewReminder,
+  scheduleEveningCheckInReminder,
+  scheduleWeeklyReviewReminder,
+} from '@/lib/notifications/reflection-reminders';
+import {
+  formatWeeklyReviewSchedule,
+  WEEKDAY_LABELS,
+} from '@/lib/weekly-reviews/schedule';
 
 const EMOTION_LABELS: Record<CheckInEmotion, string> = {
   happy: 'Happy',
@@ -53,8 +63,6 @@ const EMOTION_BACKGROUNDS: Record<CheckInEmotion, { light: string; dark: string 
   sad: { light: '#CFE3FF', dark: '#2A4160' },
   angry: { light: '#FFC6C1', dark: '#5E2B28' },
 };
-
-const EVENING_CHECK_IN_NOTIFICATION_ID = 'echo-evening-checkin';
 
 function formatCheckInDate(createdAt: string): string {
   const date = new Date(createdAt);
@@ -107,7 +115,13 @@ export default function CheckInScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const palette = Colors[colorScheme];
-  const { checkIns, updateCheckIn } = useNotes();
+  const {
+    checkIns,
+    updateCheckIn,
+    weeklyReviewPreferences,
+    setWeeklyReviewSchedule,
+    disableWeeklyReviewSchedule,
+  } = useNotes();
   const recentCheckIns = useMemo(() => checkIns.slice(0, 8), [checkIns]);
   const [selectedCheckIn, setSelectedCheckIn] = useState<CheckIn | null>(null);
   const [draftEnergy, setDraftEnergy] = useState(1);
@@ -115,33 +129,26 @@ export default function CheckInScreen() {
   const [draftBody, setDraftBody] = useState('');
   const [energyMenuOpen, setEnergyMenuOpen] = useState(false);
   const [emotionMenuOpen, setEmotionMenuOpen] = useState(false);
+  const [scheduleModalOpen, setScheduleModalOpen] = useState(false);
+  const [scheduleWeekday, setScheduleWeekday] = useState(weeklyReviewPreferences.weekday);
+  const [scheduleTime, setScheduleTime] = useState(() => {
+    const value = new Date();
+    value.setHours(weeklyReviewPreferences.hour, weeklyReviewPreferences.minute, 0, 0);
+    return value;
+  });
+  const [weeklyNotificationStatus, setWeeklyNotificationStatus] = useState<
+    'unknown' | 'scheduled' | 'denied' | 'failed'
+  >('unknown');
 
   useEffect(() => {
     let isMounted = true;
 
     void (async () => {
       try {
-        const currentPermissions = await Notifications.getPermissionsAsync();
-        const finalPermissions = canSendNotifications(currentPermissions)
-          ? currentPermissions
-          : await Notifications.requestPermissionsAsync();
-
-        if (!isMounted || !canSendNotifications(finalPermissions)) return;
-
-        await Notifications.cancelScheduledNotificationAsync(EVENING_CHECK_IN_NOTIFICATION_ID);
-        await Notifications.scheduleNotificationAsync({
-          identifier: EVENING_CHECK_IN_NOTIFICATION_ID,
-          content: {
-            title: 'Daily check-in',
-            body: 'Capture your energy, emotions, and what happened today.',
-            data: { url: '/checkin-flow' },
-          },
-          trigger: {
-            type: Notifications.SchedulableTriggerInputTypes.DAILY,
-            hour: 20,
-            minute: 0,
-          },
-        });
+        await scheduleEveningCheckInReminder(true);
+        const permissions = await Notifications.getPermissionsAsync();
+        if (!isMounted) return;
+        setWeeklyNotificationStatus(canSendNotifications(permissions) ? 'scheduled' : 'denied');
       } catch {
         // Manual check-ins still work if notifications are unavailable.
       }
@@ -151,6 +158,39 @@ export default function CheckInScreen() {
       isMounted = false;
     };
   }, []);
+
+  function openScheduleModal() {
+    const value = new Date();
+    value.setHours(weeklyReviewPreferences.hour, weeklyReviewPreferences.minute, 0, 0);
+    setScheduleWeekday(weeklyReviewPreferences.weekday);
+    setScheduleTime(value);
+    setScheduleModalOpen(true);
+  }
+
+  async function saveWeeklySchedule() {
+    const now = new Date().toISOString();
+    const preferences = {
+      enabled: true,
+      weekday: scheduleWeekday,
+      hour: scheduleTime.getHours(),
+      minute: scheduleTime.getMinutes(),
+      startsAt: now,
+      updatedAt: now,
+    };
+    setWeeklyReviewSchedule(preferences);
+    setScheduleModalOpen(false);
+    const status = await scheduleWeeklyReviewReminder(preferences, true);
+    setWeeklyNotificationStatus(
+      status === 'scheduled' || status === 'denied' || status === 'failed' ? status : 'unknown'
+    );
+  }
+
+  async function disableWeeklySchedule() {
+    disableWeeklyReviewSchedule();
+    setScheduleModalOpen(false);
+    await cancelWeeklyReviewReminder();
+    setWeeklyNotificationStatus('unknown');
+  }
 
   function openCheckIn(checkIn: CheckIn) {
     setSelectedCheckIn(checkIn);
@@ -208,6 +248,43 @@ export default function CheckInScreen() {
         <ScrollView
           contentContainerStyle={styles.historyStack}
           keyboardShouldPersistTaps="handled">
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Configure weekly review schedule"
+            onPress={openScheduleModal}
+            style={({ pressed }) => [
+              styles.scheduleCard,
+              {
+                backgroundColor: weeklyReviewPreferences.enabled
+                  ? palette.accentSoft
+                  : palette.surfaceAlt,
+                borderColor: palette.border,
+                opacity: pressed ? 0.75 : 1,
+              },
+            ]}
+          >
+            <View style={[styles.scheduleIcon, { backgroundColor: palette.surface }]}>
+              <IconSymbol name="calendar" size={21} color={palette.accent} />
+            </View>
+            <View style={styles.scheduleCopy}>
+              <ThemedText style={styles.scheduleTitle}>Weekly review</ThemedText>
+              <ThemedText style={{ color: palette.muted, fontSize: 13 }}>
+                {formatWeeklyReviewSchedule(weeklyReviewPreferences)}
+              </ThemedText>
+              {weeklyReviewPreferences.enabled && weeklyNotificationStatus === 'denied' ? (
+                <ThemedText style={{ color: palette.muted, fontSize: 12 }}>
+                  Notifications are off; the in-app reminder will still appear.
+                </ThemedText>
+              ) : null}
+              {weeklyReviewPreferences.enabled && weeklyNotificationStatus === 'failed' ? (
+                <ThemedText style={{ color: palette.muted, fontSize: 12 }}>
+                  Couldn&apos;t schedule the notification; tap to retry.
+                </ThemedText>
+              ) : null}
+            </View>
+            <IconSymbol name="chevron.right" size={18} color={palette.muted} />
+          </Pressable>
+
           {recentCheckIns.map((checkIn) => {
             const primaryEmotion = getPrimaryEmotion(checkIn.emotions);
             const emotionTone = primaryEmotion
@@ -280,6 +357,101 @@ export default function CheckInScreen() {
           ) : null}
         </ScrollView>
       </View>
+
+      <Modal
+        visible={scheduleModalOpen}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setScheduleModalOpen(false)}
+      >
+        <Pressable onPress={() => setScheduleModalOpen(false)} style={styles.modalOverlay}>
+          <Pressable
+            onPress={(event) => event.stopPropagation()}
+            style={[
+              styles.scheduleModalCard,
+              { backgroundColor: palette.surface, borderColor: palette.border },
+            ]}
+          >
+            <View style={styles.scheduleModalHeader}>
+              <View>
+                <ThemedText type="subtitle">Weekly review</ThemedText>
+                <ThemedText style={{ color: palette.muted, fontSize: 13 }}>
+                  Choose when your week wraps up.
+                </ThemedText>
+              </View>
+              <Pressable
+                accessibilityLabel="Close weekly review schedule"
+                hitSlop={8}
+                onPress={() => setScheduleModalOpen(false)}
+              >
+                <IconSymbol name="xmark" size={18} color={palette.text} />
+              </Pressable>
+            </View>
+
+            <View style={styles.weekdayGrid}>
+              {WEEKDAY_LABELS.map((label, index) => {
+                const value = index + 1;
+                const selected = scheduleWeekday === value;
+                return (
+                  <Pressable
+                    key={label}
+                    accessibilityRole="button"
+                    accessibilityState={{ selected }}
+                    onPress={() => setScheduleWeekday(value)}
+                    style={[
+                      styles.weekdayButton,
+                      {
+                        backgroundColor: selected ? palette.accentSoft : palette.surfaceAlt,
+                        borderColor: selected ? palette.accent : palette.border,
+                      },
+                    ]}
+                  >
+                    <ThemedText style={{ color: selected ? palette.accent : palette.text }}>
+                      {label.slice(0, 3)}
+                    </ThemedText>
+                  </Pressable>
+                );
+              })}
+            </View>
+
+            <View style={styles.timePickerWrap}>
+              <ThemedText style={styles.scheduleFieldLabel}>Time</ThemedText>
+              <DateTimePicker
+                value={scheduleTime}
+                mode="time"
+                display="spinner"
+                themeVariant={colorScheme}
+                accentColor={palette.accent}
+                onValueChange={(_event, date) => setScheduleTime(date)}
+                style={styles.timePicker}
+              />
+            </View>
+
+            <View style={styles.scheduleActions}>
+              {weeklyReviewPreferences.enabled ? (
+                <Pressable
+                  accessibilityRole="button"
+                  onPress={() => void disableWeeklySchedule()}
+                  style={[styles.disableButton, { borderColor: palette.border }]}
+                >
+                  <ThemedText style={{ color: colorScheme === 'dark' ? '#FF9B9B' : '#A82424' }}>
+                    Turn off
+                  </ThemedText>
+                </Pressable>
+              ) : null}
+              <Pressable
+                accessibilityRole="button"
+                onPress={() => void saveWeeklySchedule()}
+                style={[styles.saveScheduleButton, { backgroundColor: palette.accent }]}
+              >
+                <ThemedText style={{ color: palette.background, fontWeight: '700' }}>
+                  Save schedule
+                </ThemedText>
+              </Pressable>
+            </View>
+          </Pressable>
+        </Pressable>
+      </Modal>
 
       <Modal
         visible={selectedCheckIn !== null}
@@ -756,5 +928,70 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: 18,
+  },
+  scheduleCard: {
+    minHeight: 82,
+    borderWidth: 1,
+    borderRadius: 18,
+    padding: 14,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  scheduleIcon: {
+    width: 42,
+    height: 42,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  scheduleCopy: { flex: 1, gap: 3 },
+  scheduleTitle: { fontSize: 15, fontWeight: '700' },
+  scheduleModalCard: {
+    width: '92%',
+    maxWidth: 520,
+    borderWidth: 1,
+    borderRadius: 24,
+    padding: 20,
+    gap: 22,
+  },
+  scheduleModalHeader: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    gap: 16,
+  },
+  weekdayGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  weekdayButton: {
+    minWidth: 54,
+    minHeight: 42,
+    borderWidth: 1,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 10,
+  },
+  timePickerWrap: { gap: 4 },
+  scheduleFieldLabel: { fontSize: 14, fontWeight: '700' },
+  timePicker: { height: 132 },
+  scheduleActions: { flexDirection: 'row', justifyContent: 'flex-end', gap: 10 },
+  disableButton: {
+    minHeight: 48,
+    borderWidth: 1,
+    borderRadius: 999,
+    paddingHorizontal: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  saveScheduleButton: {
+    minHeight: 48,
+    borderRadius: 999,
+    paddingHorizontal: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
 });

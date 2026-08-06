@@ -36,6 +36,8 @@ export default async function handler(
         deletedNotes: parsed.snapshot.deletedNotes,
         bucketPreferences: parsed.snapshot.bucketPreferences,
         standingMessages: parsed.snapshot.standingMessages,
+        weeklyReviews: parsed.snapshot.weeklyReviews,
+        weeklyReviewPreferences: parsed.snapshot.weeklyReviewPreferences,
       },
       parsed.deviceId
     );
@@ -46,6 +48,8 @@ export default async function handler(
       deletedNotes: merged.state.deletedNotes,
       bucketPreferences: merged.state.bucketPreferences,
       standingMessages: merged.state.standingMessages,
+      weeklyReviews: merged.state.weeklyReviews,
+      weeklyReviewPreferences: merged.state.weeklyReviewPreferences,
       syncedAt: new Date().toISOString(),
       summary: merged.summary,
     });

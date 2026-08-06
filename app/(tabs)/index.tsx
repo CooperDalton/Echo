@@ -2,7 +2,7 @@ import { useMemo, useState, useEffect, useCallback } from 'react';
 import { Pressable, StyleSheet, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { useFocusEffect, useNavigation } from '@react-navigation/native';
+import { useFocusEffect, useNavigation } from 'expo-router/react-navigation';
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
@@ -35,6 +35,8 @@ export default function CaptureScreen() {
 
   useEffect(() => {
     if (typeof initialTextParam === 'string') {
+      // The route param is external navigation state and can change while this tab stays mounted.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setText(initialTextParam);
     }
   }, [initialTextParam]);

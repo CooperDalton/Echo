@@ -25,6 +25,8 @@ const MAPPING = {
   'square.and.pencil': 'edit',
   'checkmark': 'check',
   'checkmark.circle': 'check-circle',
+  'checkmark.circle.fill': 'check-circle',
+  calendar: 'calendar-today',
   trash: 'delete-outline',
   'trash.fill': 'delete',
   sparkles: 'auto-awesome',

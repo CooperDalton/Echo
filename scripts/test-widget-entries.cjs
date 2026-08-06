@@ -133,6 +133,15 @@ function state(overrides = {}) {
     bucketPreferences: { customs: [] },
     standingMessages: [],
     widgetPreferences: DEFAULT_WIDGET_PREFERENCES,
+    weeklyReviews: [],
+    weeklyReviewPreferences: {
+      enabled: false,
+      weekday: 1,
+      hour: 18,
+      minute: 0,
+      startsAt: null,
+      updatedAt: null,
+    },
     ...overrides,
   };
 }

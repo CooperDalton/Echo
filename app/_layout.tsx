@@ -1,4 +1,4 @@
-import { DarkTheme, DefaultTheme, ThemeProvider } from '@react-navigation/native';
+import { DarkTheme, DefaultTheme, ThemeProvider } from 'expo-router/react-navigation';
 import * as Notifications from 'expo-notifications';
 import { Stack, useRouter } from 'expo-router';
 import * as Linking from 'expo-linking';
@@ -6,6 +6,7 @@ import { StatusBar } from 'expo-status-bar';
 import { useEffect } from 'react';
 import 'react-native-reanimated';
 
+import { ReflectionPromptCoordinator } from '@/components/reflection-prompt-coordinator';
 import { NotesProvider } from '@/context/notes-context';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { canUseEchoWidget } from '@/lib/widgets/availability';
@@ -32,6 +33,10 @@ function NotificationRouter() {
     const url = lastNotificationResponse?.notification.request.content.data?.url;
     if (url === '/checkin' || url === '/checkin-flow') {
       router.push('/checkin-flow' as never);
+      return;
+    }
+    if (url === '/weekly-review') {
+      router.push({ pathname: '/weekly-review', params: { source: 'notification' } });
     }
   }, [lastNotificationResponse, router]);
 
@@ -102,10 +107,15 @@ export default function RootLayout() {
         <Stack>
           <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
           <Stack.Screen name="checkin-flow" options={{ headerShown: false }} />
+          <Stack.Screen
+            name="weekly-review"
+            options={{ headerShown: false, presentation: 'modal' }}
+          />
           <Stack.Screen name="standing/[standingMessageId]" options={{ headerShown: false }} />
         </Stack>
         <NotificationRouter />
         <DeepLinkRouter />
+        <ReflectionPromptCoordinator />
         <StatusBar style="auto" />
       </ThemeProvider>
     </NotesProvider>

@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import {
   Animated,
   Dimensions,
-  LayoutChangeEvent,
+  type LayoutChangeEvent,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -15,13 +15,17 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
+import { IconSymbol } from '@/components/ui/icon-symbol';
 import { useNotes } from '@/context/notes-context';
 import type { BucketName } from '@/constants/buckets';
 import { Colors } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
-import type { BucketDraft, Note } from '@/lib/notes/types';
+import type { BucketDraft, Note, WeeklyReview } from '@/lib/notes/types';
 
-type BucketFilter = BucketName | 'All' | 'Unbucketed';
+type BucketFilter = BucketName | 'All' | 'Unbucketed' | 'Weekly Reviews';
+type LibraryItem =
+  | { kind: 'note'; note: Note; list: 'recent' | 'reviewed'; sortDate: string }
+  | { kind: 'weekly-review'; review: WeeklyReview; sortDate: string };
 
 const PRESET_COLORS = {
   mint: { lightBg: '#E8F6EC', lightBorder: '#B8E1C4', lightText: '#1E6B3C', darkBg: '#223629', darkBorder: '#32543E', darkText: '#A9E3BC' },
@@ -42,7 +46,7 @@ type PresetKey = keyof typeof PRESET_COLORS;
 const PRESET_COLOR_KEYS = Object.keys(PRESET_COLORS) as PresetKey[];
 
 function normalizePresetKey(value: string): PresetKey {
-  return PRESET_COLOR_KEYS.includes(value as PresetKey) ? (value as PresetKey) : PRESET_COLOR_KEYS[0];
+  return PRESET_COLOR_KEYS.includes(value as PresetKey) ? (value as PresetKey) : 'mint';
 }
 
 function presetTone(colorKey: string, colorScheme: 'light' | 'dark') {
@@ -52,15 +56,16 @@ function presetTone(colorKey: string, colorScheme: 'light' | 'dark') {
     : { bg: color.lightBg, border: color.lightBorder, text: color.lightText };
 }
 
-function bucketTone(bucketName: BucketName, buckets: BucketDraft[], colorScheme: 'light' | 'dark') {
-  const bucket = buckets.find((item) => item.name === bucketName);
-  return bucket ? presetTone(bucket.colorKey, colorScheme) : uncategorizedTone(colorScheme);
-}
-
 function uncategorizedTone(colorScheme: 'light' | 'dark') {
   return colorScheme === 'dark'
     ? { bg: '#2A2D33', border: '#3F4652', text: '#C9D0DC' }
     : { bg: '#F2F4F8', border: '#D6DCE6', text: '#4A5568' };
+}
+
+function weeklyReviewTone(colorScheme: 'light' | 'dark') {
+  return colorScheme === 'dark'
+    ? { bg: '#332947', border: '#51416F', text: '#D8C7F4' }
+    : { bg: '#F1EAFE', border: '#D8C8FA', text: '#5E35A8' };
 }
 
 function dangerTone(colorScheme: 'light' | 'dark') {
@@ -69,20 +74,20 @@ function dangerTone(colorScheme: 'light' | 'dark') {
     : { bg: '#FDEAEA', border: '#F2C6C6', text: '#8C2B2B' };
 }
 
-function noteMatchesBucket(note: Note, selectedBucket: BucketFilter): boolean {
-  if (selectedBucket === 'All') return true;
-  if (selectedBucket === 'Unbucketed') return note.bucket === null;
-  return note.bucket === selectedBucket;
+function bucketTone(bucketName: BucketName, buckets: BucketDraft[], colorScheme: 'light' | 'dark') {
+  const bucket = buckets.find((item) => item.name === bucketName);
+  return bucket ? presetTone(bucket.colorKey, colorScheme) : uncategorizedTone(colorScheme);
 }
 
 function isLibraryNote(note: Note): boolean {
   return !(note.echo.enabled && note.bucket === null);
 }
 
-function noteBucketLabel(note: Note): string {
-  if (note.bucket) return note.bucket;
-  if (note.classificationStatus === 'pending') return 'Categorizing...';
-  return 'Unbucketed';
+function noteMatchesFilter(note: Note, selected: BucketFilter): boolean {
+  if (selected === 'All') return true;
+  if (selected === 'Weekly Reviews') return false;
+  if (selected === 'Unbucketed') return note.bucket === null;
+  return note.bucket === selected;
 }
 
 function notePreview(body: string): string {
@@ -92,561 +97,316 @@ function notePreview(body: string): string {
 function shouldShowBodyOnly(note: Note): boolean {
   const body = notePreview(note.body);
   const title = notePreview(note.title);
-  return body.length <= 32 || title.length === 0 || body === title;
+  return body.length <= 32 || !title || body === title;
 }
 
-function formatSyncLabel(
-  isSyncing: boolean,
-  configured: boolean,
-  lastSyncedAt: string | null,
-  lastError: string | null
-): string {
-  if (isSyncing) return 'Syncing…';
-  if (lastError) return 'Sync failed';
-  if (!configured) return 'Sync needs setup';
-  if (!lastSyncedAt) return 'Ready to sync';
+function formatWeeklyReviewDate(value: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return 'Weekly review';
+  return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+}
 
-  const syncedAt = new Date(lastSyncedAt);
-  if (Number.isNaN(syncedAt.getTime())) return 'Synced';
-  return `Synced ${syncedAt.toLocaleTimeString(undefined, {
-    hour: 'numeric',
-    minute: '2-digit',
-  })}`;
+function weeklyReviewSearchText(review: WeeklyReview): string {
+  return `${formatWeeklyReviewDate(review.scheduledFor)} ${review.reflection} ${review.nextWeekIntent}`.toLowerCase();
 }
 
 export default function LibraryScreen() {
   const colorScheme = useColorScheme() ?? 'light';
-  const insets = useSafeAreaInsets();
   const palette = Colors[colorScheme];
+  const insets = useSafeAreaInsets();
   const router = useRouter();
   const {
     hydrated,
     recent,
     reviewed,
+    weeklyReviews,
     bucketPreferences,
     markNoteAsReviewed,
     deleteRecentNote,
     deleteReviewedNote,
-    syncNow,
-    syncStatus,
   } = useNotes();
   const customBuckets = bucketPreferences.customs;
-
   const [searchQuery, setSearchQuery] = useState('');
   const [bucketOpen, setBucketOpen] = useState(false);
   const [selectedBucket, setSelectedBucket] = useState<BucketFilter>('All');
   const [rowSizes, setRowSizes] = useState<Record<string, { width: number; height: number }>>({});
-
   const trimmedQuery = searchQuery.trim().toLowerCase();
-  const neutralTone = useMemo(() => uncategorizedTone(colorScheme), [colorScheme]);
+
+  const filterOptions: BucketFilter[] = useMemo(
+    () => ['All', 'Weekly Reviews', 'Unbucketed', ...customBuckets.map((bucket) => bucket.name)],
+    [customBuckets]
+  );
 
   const selectedTone = useMemo(() => {
     if (selectedBucket === 'All') return null;
-    if (selectedBucket === 'Unbucketed') return neutralTone;
+    if (selectedBucket === 'Weekly Reviews') return weeklyReviewTone(colorScheme);
+    if (selectedBucket === 'Unbucketed') return uncategorizedTone(colorScheme);
     return bucketTone(selectedBucket, customBuckets, colorScheme);
-  }, [selectedBucket, customBuckets, colorScheme, neutralTone]);
+  }, [colorScheme, customBuckets, selectedBucket]);
 
-  const filteredRecent = useMemo(() => {
-    const bucketFiltered = recent.filter(
-      (note) => isLibraryNote(note) && noteMatchesBucket(note, selectedBucket)
-    );
-    if (!trimmedQuery) return bucketFiltered;
-
-    return bucketFiltered.filter((note) =>
-      `${note.title} ${note.body} ${note.bucket ?? 'unbucketed'}`
+  const libraryItems = useMemo(() => {
+    const noteItems: LibraryItem[] = [
+      ...recent.map((note) => ({ kind: 'note' as const, note, list: 'recent' as const, sortDate: note.createdAt })),
+      ...reviewed.map((note) => ({ kind: 'note' as const, note, list: 'reviewed' as const, sortDate: note.createdAt })),
+    ].filter((item) => {
+      if (!isLibraryNote(item.note) || !noteMatchesFilter(item.note, selectedBucket)) return false;
+      if (!trimmedQuery) return true;
+      return `${item.note.title} ${item.note.body} ${item.note.bucket ?? 'unbucketed'}`
         .toLowerCase()
-        .includes(trimmedQuery)
-    );
-  }, [recent, selectedBucket, trimmedQuery]);
+        .includes(trimmedQuery);
+    });
 
-  const filteredReviewed = useMemo(() => {
-    const bucketFiltered = reviewed.filter(
-      (note) => isLibraryNote(note) && noteMatchesBucket(note, selectedBucket)
-    );
-    if (!trimmedQuery) return bucketFiltered;
+    const reviewItems: LibraryItem[] =
+      selectedBucket === 'All' || selectedBucket === 'Weekly Reviews'
+        ? weeklyReviews
+            .filter((review) => !trimmedQuery || weeklyReviewSearchText(review).includes(trimmedQuery))
+            .map((review) => ({
+              kind: 'weekly-review' as const,
+              review,
+              sortDate: review.scheduledFor,
+            }))
+        : [];
 
-    return bucketFiltered.filter((note) =>
-      `${note.title} ${note.body} ${note.bucket ?? 'unbucketed'}`
-        .toLowerCase()
-        .includes(trimmedQuery)
+    return [...noteItems, ...reviewItems].sort((left, right) =>
+      right.sortDate.localeCompare(left.sortDate)
     );
-  }, [reviewed, selectedBucket, trimmedQuery]);
+  }, [recent, reviewed, selectedBucket, trimmedQuery, weeklyReviews]);
 
   function onRowLayout(id: string) {
-    return (e: LayoutChangeEvent) => {
-      const { width: w, height: h } = e.nativeEvent.layout;
-      setRowSizes((prev) => {
-        const prevW = prev[id]?.width;
-        const prevH = prev[id]?.height;
-        if (prevW === w && prevH === h) return prev;
-        return { ...prev, [id]: { width: w, height: h } };
-      });
+    return (event: LayoutChangeEvent) => {
+      const { width, height } = event.nativeEvent.layout;
+      setRowSizes((current) =>
+        current[id]?.width === width && current[id]?.height === height
+          ? current
+          : { ...current, [id]: { width, height } }
+      );
     };
   }
 
-  function renderBucketPill(note: Note) {
-    const tone = note.bucket ? bucketTone(note.bucket, customBuckets, colorScheme) : neutralTone;
+  function renderNote(item: Extract<LibraryItem, { kind: 'note' }>) {
+    const { note, list } = item;
+    const size = rowSizes[note.id];
+    const actionWidth = size?.width ?? Dimensions.get('window').width;
+    const bodyOnly = shouldShowBodyOnly(note);
+    const bodyText = notePreview(note.body);
+    const titleText = bodyOnly ? bodyText : note.title;
+    const noteTone = note.bucket
+      ? bucketTone(note.bucket, customBuckets, colorScheme)
+      : uncategorizedTone(colorScheme);
+    const reviewedTone = colorScheme === 'dark'
+      ? { bg: '#20352A', border: '#33583F', text: '#B9E8C7' }
+      : { bg: '#E8F6EC', border: '#B8E1C4', text: '#1E6B3C' };
 
     return (
-      <View
-        style={[
-          styles.bucketPill,
-          styles.noteBucketPill,
-          { backgroundColor: tone.bg, borderColor: tone.border },
+      <Swipeable
+        key={`note-${note.id}`}
+        friction={1.1}
+        leftThreshold={Math.min(120, Math.max(60, actionWidth * 0.25))}
+        rightThreshold={Math.min(120, Math.max(60, actionWidth * 0.25))}
+        overshootLeft={false}
+        overshootRight={false}
+        renderLeftActions={(_progress, dragX) => {
+          if (!size) return null;
+          const danger = dangerTone(colorScheme);
+          const translateIn = dragX.interpolate({
+            inputRange: [0, actionWidth],
+            outputRange: [-actionWidth, 0],
+            extrapolate: 'clamp',
+          });
+          return (
+            <View style={[styles.swipeActionContainer, { width: actionWidth, height: size.height }]}>
+              <Animated.View
+                style={[
+                  styles.swipeActionFill,
+                  {
+                    width: actionWidth,
+                    backgroundColor: danger.bg,
+                    borderColor: danger.border,
+                    transform: [{ translateX: translateIn }],
+                  },
+                ]}
+              >
+                <ThemedText style={{ color: danger.text, fontSize: 13 }}>Delete</ThemedText>
+              </Animated.View>
+            </View>
+          );
+        }}
+        renderRightActions={list === 'recent' ? (_progress, dragX) => {
+          if (!size) return null;
+          const translateIn = dragX.interpolate({
+            inputRange: [-actionWidth, 0],
+            outputRange: [0, actionWidth],
+            extrapolate: 'clamp',
+          });
+          return (
+            <View style={[styles.swipeActionContainer, { width: actionWidth, height: size.height }]}>
+              <Animated.View
+                style={[
+                  styles.swipeActionFill,
+                  {
+                    width: actionWidth,
+                    backgroundColor: reviewedTone.bg,
+                    borderColor: reviewedTone.border,
+                    transform: [{ translateX: translateIn }],
+                  },
+                ]}
+              >
+                <ThemedText style={{ color: reviewedTone.text, fontSize: 13 }}>Reviewed</ThemedText>
+              </Animated.View>
+            </View>
+          );
+        } : undefined}
+        onSwipeableOpen={(direction) => {
+          if (direction === 'right' && list === 'recent') markNoteAsReviewed(note.id);
+          if (direction === 'left') {
+            if (list === 'recent') deleteRecentNote(note.id);
+            else deleteReviewedNote(note.id);
+          }
+        }}
+      >
+        <Pressable
+          onLayout={onRowLayout(note.id)}
+          accessibilityLabel={`Open note: ${note.title}`}
+          onPress={() => router.push({ pathname: '/', params: { text: note.body, returnTo: '/explore', noteId: note.id } })}
+          style={({ pressed }) => [
+            styles.card,
+            { backgroundColor: palette.surface, borderColor: palette.border, opacity: pressed ? 0.75 : 1 },
+          ]}
+        >
+          <View style={styles.cardHeader}>
+            <ThemedText style={styles.cardTitle} numberOfLines={1}>{titleText}</ThemedText>
+            <View style={[styles.pill, { backgroundColor: noteTone.bg, borderColor: noteTone.border }]}>
+              <ThemedText style={{ color: noteTone.text, fontSize: 11 }} numberOfLines={1}>
+                {note.bucket ?? (note.classificationStatus === 'pending' ? 'Categorizing…' : 'Unbucketed')}
+              </ThemedText>
+            </View>
+          </View>
+          {!bodyOnly ? (
+            <ThemedText style={{ color: palette.muted, marginTop: 6 }} numberOfLines={2}>
+              {bodyText}
+            </ThemedText>
+          ) : null}
+        </Pressable>
+      </Swipeable>
+    );
+  }
+
+  function renderWeeklyReview(review: WeeklyReview) {
+    const tone = weeklyReviewTone(colorScheme);
+    return (
+      <Pressable
+        key={`weekly-${review.id}`}
+        accessibilityLabel={`Open weekly review from ${formatWeeklyReviewDate(review.scheduledFor)}`}
+        onPress={() => router.push({ pathname: '/weekly-review', params: { reviewId: review.id, source: 'history' } })}
+        style={({ pressed }) => [
+          styles.card,
+          { backgroundColor: palette.surface, borderColor: tone.border, opacity: pressed ? 0.75 : 1 },
         ]}
       >
-        <ThemedText style={{ fontSize: 10, lineHeight: 12, color: tone.text }}>
-          {noteBucketLabel(note)}
-        </ThemedText>
-      </View>
+        <View style={styles.cardHeader}>
+          <View style={styles.weeklyTitleWrap}>
+            <IconSymbol name="calendar" size={17} color={tone.text} />
+            <ThemedText style={styles.cardTitle}>{formatWeeklyReviewDate(review.scheduledFor)}</ThemedText>
+          </View>
+          <View style={[styles.pill, { backgroundColor: tone.bg, borderColor: tone.border }]}>
+            <ThemedText style={{ color: tone.text, fontSize: 11 }}>Weekly Review</ThemedText>
+          </View>
+        </View>
+        <View style={styles.reviewPreview}>
+          <ThemedText style={styles.previewLabel}>The week</ThemedText>
+          <ThemedText style={{ color: palette.text }} numberOfLines={2}>{review.reflection}</ThemedText>
+          <ThemedText style={styles.previewLabel}>Next week</ThemedText>
+          <ThemedText style={{ color: palette.text }} numberOfLines={2}>{review.nextWeekIntent}</ThemedText>
+        </View>
+      </Pressable>
     );
   }
 
   return (
-    <GestureHandlerRootView style={{ flex: 1 }}>
-      <ThemedView
-        style={[styles.screen, { paddingTop: insets.top }]}
-        onStartShouldSetResponder={() => bucketOpen}
-        onResponderStart={() => {
-          if (bucketOpen) setBucketOpen(false);
-        }}
-      >
+    <GestureHandlerRootView style={styles.screen}>
+      <ThemedView style={[styles.screen, { paddingTop: insets.top }]}>
         <ScrollView
           style={styles.scroll}
-          keyboardDismissMode="on-drag"
           keyboardShouldPersistTaps="handled"
-          contentContainerStyle={[
-            styles.content,
-            { paddingBottom: 28 + insets.bottom, flexGrow: 1 },
-          ]}
+          contentContainerStyle={[styles.content, { paddingBottom: 28 + insets.bottom }]}
         >
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="Sync notes now"
-            disabled={syncStatus.isSyncing || !syncStatus.configured}
-            onPress={() => {
-              void syncNow();
-            }}
-            style={({ pressed }) => [
-              styles.syncCard,
-              {
-                backgroundColor: palette.surfaceAlt,
-                borderColor: syncStatus.lastError ? '#A82424' : palette.border,
-                opacity:
-                  pressed || syncStatus.isSyncing || !syncStatus.configured ? 0.7 : 1,
-              },
-            ]}
-          >
-            <View style={styles.syncCopy}>
-              <ThemedText style={{ color: palette.text, fontSize: 13, fontWeight: '600' }}>
-                {formatSyncLabel(
-                  syncStatus.isSyncing,
-                  syncStatus.configured,
-                  syncStatus.lastSyncedAt,
-                  syncStatus.lastError
-                )}
-              </ThemedText>
-              {syncStatus.lastError || syncStatus.pendingReason ? (
-                <ThemedText style={{ color: palette.muted, fontSize: 11 }} numberOfLines={1}>
-                  {syncStatus.lastError ?? syncStatus.pendingReason}
-                </ThemedText>
-              ) : null}
-            </View>
-            <ThemedText style={{ color: palette.accent, fontSize: 12, fontWeight: '600' }}>
-              {syncStatus.isSyncing ? 'Please wait' : 'Sync now'}
-            </ThemedText>
-          </Pressable>
-
           <View style={styles.searchRow}>
-            <View
-              style={[
-                styles.searchInputWrap,
-                { backgroundColor: palette.surface, borderColor: palette.border },
-              ]}
-            >
+            <View style={[styles.searchInputWrap, { backgroundColor: palette.surface, borderColor: palette.border }]}>
               <TextInput
+                accessibilityLabel="Search library"
+                placeholder="Search"
+                placeholderTextColor={palette.muted}
                 value={searchQuery}
                 onChangeText={setSearchQuery}
-                placeholder="Search notes"
-                placeholderTextColor={palette.muted}
                 style={[styles.searchInput, { color: palette.text }]}
-                autoCapitalize="none"
-                autoCorrect={false}
-                returnKeyType="search"
               />
             </View>
-
-            <View style={styles.bucketWrap}>
+            <View style={styles.filterWrap}>
               <Pressable
-                style={({ pressed }) => [
-                  styles.bucketTrigger,
+                accessibilityRole="button"
+                accessibilityLabel="Filter library"
+                onPress={() => setBucketOpen((open) => !open)}
+                style={[
+                  styles.filterTrigger,
                   {
+                    backgroundColor: selectedTone?.bg ?? palette.surface,
                     borderColor: selectedTone?.border ?? palette.border,
-                    backgroundColor: selectedTone?.bg ?? palette.surfaceAlt,
-                    opacity: pressed ? 0.7 : 1,
                   },
                 ]}
-                onPress={() => setBucketOpen((open) => !open)}
               >
-                <ThemedText style={{ color: selectedTone?.text ?? palette.text, fontSize: 13 }}>
+                <ThemedText style={{ color: selectedTone?.text ?? palette.text, fontSize: 13 }} numberOfLines={1}>
                   {selectedBucket}
                 </ThemedText>
-                <ThemedText
-                  style={{ color: selectedTone?.text ?? palette.muted, fontSize: 12 }}
-                >
-                  v
-                </ThemedText>
+                <IconSymbol name={bucketOpen ? 'chevron.up' : 'chevron.down'} size={14} color={selectedTone?.text ?? palette.text} />
               </Pressable>
               {bucketOpen ? (
-                <View
-                  style={[
-                    styles.bucketMenu,
-                    {
-                      backgroundColor: palette.surface,
-                      borderColor: palette.border,
-                      paddingHorizontal: 6,
-                    },
-                  ]}
-                >
-                  <Pressable
-                    style={({ pressed }) => [
-                      styles.bucketOption,
-                      {
-                        backgroundColor: palette.surfaceAlt,
-                        borderColor: palette.border,
-                        opacity: pressed ? 0.7 : 1,
-                      },
-                    ]}
-                    onPress={() => {
-                      setSelectedBucket('All');
-                      setBucketOpen(false);
-                    }}
-                  >
-                    <ThemedText style={{ color: palette.text, fontSize: 13 }}>All</ThemedText>
-                  </Pressable>
-
-                  {customBuckets.map((bucket) => {
-                    const tone = presetTone(bucket.colorKey, colorScheme);
+                <View style={[styles.filterMenu, { backgroundColor: palette.surface, borderColor: palette.border }]}>
+                  {filterOptions.map((option) => {
+                    const tone = option === 'Weekly Reviews'
+                      ? weeklyReviewTone(colorScheme)
+                      : option === 'Unbucketed'
+                        ? uncategorizedTone(colorScheme)
+                        : option === 'All'
+                          ? null
+                          : bucketTone(option, customBuckets, colorScheme);
                     return (
                       <Pressable
-                        key={bucket.name}
-                        style={({ pressed }) => [
-                          styles.bucketOption,
-                          {
-                            backgroundColor: tone.bg,
-                            borderColor: tone.border,
-                            opacity: pressed ? 0.7 : 1,
-                          },
+                        key={option}
+                        onPress={() => { setSelectedBucket(option); setBucketOpen(false); }}
+                        style={[
+                          styles.filterOption,
+                          { backgroundColor: tone?.bg ?? palette.surfaceAlt, borderColor: tone?.border ?? palette.border },
                         ]}
-                        onPress={() => {
-                          setSelectedBucket(bucket.name);
-                          setBucketOpen(false);
-                        }}
                       >
-                        <ThemedText style={{ color: tone.text, fontSize: 13 }}>
-                          {bucket.name}
-                        </ThemedText>
+                        <ThemedText style={{ color: tone?.text ?? palette.text, fontSize: 13 }}>{option}</ThemedText>
                       </Pressable>
                     );
                   })}
-
-                  <Pressable
-                    style={({ pressed }) => [
-                      styles.bucketOption,
-                      {
-                        backgroundColor: neutralTone.bg,
-                        borderColor: neutralTone.border,
-                        opacity: pressed ? 0.7 : 1,
-                      },
-                    ]}
-                    onPress={() => {
-                      setSelectedBucket('Unbucketed');
-                      setBucketOpen(false);
-                    }}
-                  >
-                    <ThemedText style={{ color: neutralTone.text, fontSize: 13 }}>
-                      Unbucketed
-                    </ThemedText>
-                  </Pressable>
                 </View>
               ) : null}
             </View>
           </View>
 
-          <View style={styles.section}>
+          <View style={styles.sectionHeader}>
             <ThemedText type="subtitle" style={{ fontSize: 18 }}>
-              Recent Notes
+              {selectedBucket === 'Weekly Reviews' ? 'Weekly Reviews' : 'Library'}
             </ThemedText>
-            <View style={styles.noteStack}>
-              {filteredRecent.map((note) => {
-                const reviewedTone = colorScheme === 'dark'
-                  ? { bg: '#20352A', border: '#33583F', text: '#B9E8C7' }
-                  : { bg: '#E8F6EC', border: '#B8E1C4', text: '#1E6B3C' };
-                const size = rowSizes[note.id];
-                const actionWidth = size?.width ?? Dimensions.get('window').width;
-                const actionHeight = size?.height;
-                const bodyOnly = shouldShowBodyOnly(note);
-                const bodyText = notePreview(note.body);
-                const titleText = bodyOnly ? bodyText : note.title;
-
-                return (
-                  <Swipeable
-                    key={note.id}
-                    friction={1.1}
-                    rightThreshold={Math.min(120, Math.max(60, actionWidth * 0.25))}
-                    leftThreshold={Math.min(120, Math.max(60, actionWidth * 0.25))}
-                    overshootRight={false}
-                    overshootLeft={false}
-                    containerStyle={{ overflow: 'visible' }}
-                    childrenContainerStyle={{ overflow: 'visible' }}
-                    renderRightActions={(_progress, dragX) => {
-                      if (!size) return null;
-                      const translateIn = dragX.interpolate({
-                        inputRange: [-actionWidth, 0],
-                        outputRange: [0, actionWidth],
-                        extrapolate: 'clamp',
-                      });
-
-                      return (
-                        <View
-                          style={[
-                            styles.rightActionContainer,
-                            {
-                              width: actionWidth,
-                              height: actionHeight,
-                              borderRadius: 18,
-                            },
-                          ]}
-                        >
-                          <Animated.View
-                            style={[
-                              styles.rightActionFill,
-                              {
-                                width: actionWidth,
-                                transform: [{ translateX: translateIn }],
-                                backgroundColor: reviewedTone.bg,
-                                borderColor: reviewedTone.border,
-                              },
-                            ]}
-                          >
-                            <ThemedText style={{ color: reviewedTone.text, fontSize: 13 }}>
-                              Reviewed
-                            </ThemedText>
-                          </Animated.View>
-                        </View>
-                      );
-                    }}
-                    renderLeftActions={(_progress, dragX) => {
-                      if (!size) return null;
-                      const danger = dangerTone(colorScheme);
-                      const translateIn = dragX.interpolate({
-                        inputRange: [0, actionWidth],
-                        outputRange: [-actionWidth, 0],
-                        extrapolate: 'clamp',
-                      });
-
-                      return (
-                        <View
-                          style={[
-                            styles.leftActionContainer,
-                            { width: actionWidth, height: actionHeight, borderRadius: 18 },
-                          ]}
-                        >
-                          <Animated.View
-                            style={[
-                              styles.leftActionFill,
-                              {
-                                width: actionWidth,
-                                transform: [{ translateX: translateIn }],
-                                backgroundColor: danger.bg,
-                                borderColor: danger.border,
-                              },
-                            ]}
-                          >
-                            <ThemedText style={{ color: danger.text, fontSize: 13 }}>
-                              Delete
-                            </ThemedText>
-                          </Animated.View>
-                        </View>
-                      );
-                    }}
-                    onSwipeableOpen={(dir) => {
-                      if (dir === 'right') {
-                        markNoteAsReviewed(note.id);
-                      } else if (dir === 'left') {
-                        deleteRecentNote(note.id);
-                      }
-                    }}
-                  >
-                    <Pressable
-                      onLayout={onRowLayout(note.id)}
-                      accessibilityLabel={`Open note: ${note.title}`}
-                      onPress={() => {
-                        router.push({
-                          pathname: '/',
-                          params: { text: note.body, returnTo: '/explore', noteId: note.id },
-                        });
-                      }}
-                      style={({ pressed }) => [
-                        styles.noteCard,
-                        {
-                          backgroundColor: palette.surface,
-                          borderColor: palette.border,
-                          opacity: pressed ? 0.7 : 1,
-                        },
-                      ]}
-                    >
-                      <View style={styles.noteHeaderRow}>
-                        <ThemedText style={styles.noteTitle} numberOfLines={1}>
-                          {titleText}
-                        </ThemedText>
-                        {renderBucketPill(note)}
-                      </View>
-                      {bodyOnly ? null : (
-                        <ThemedText
-                          style={{ color: palette.muted, marginTop: 6 }}
-                          numberOfLines={2}
-                        >
-                          {bodyText}
-                        </ThemedText>
-                      )}
-                    </Pressable>
-                  </Swipeable>
-                );
-              })}
-
-              {filteredRecent.length === 0 ? (
-                <View
-                  style={[
-                    styles.noteCard,
-                    { backgroundColor: palette.surfaceAlt, borderColor: palette.border },
-                  ]}
-                >
-                  <ThemedText style={{ color: palette.muted }}>
-                    {hydrated
-                      ? 'No recent notes match your search.'
-                      : 'Loading local notes...'}
-                  </ThemedText>
-                </View>
-              ) : null}
-            </View>
+            <ThemedText style={{ color: palette.muted, fontSize: 12 }}>
+              {libraryItems.length} {libraryItems.length === 1 ? 'item' : 'items'}
+            </ThemedText>
           </View>
 
-          <View style={styles.section}>
-            <ThemedText type="subtitle" style={{ fontSize: 18 }}>
-              Notes
-            </ThemedText>
-            <View style={styles.noteStack}>
-              {filteredReviewed.map((note) => {
-                const size = rowSizes[note.id];
-                const actionWidth = size?.width ?? Dimensions.get('window').width;
-                const actionHeight = size?.height;
-                const bodyOnly = shouldShowBodyOnly(note);
-                const bodyText = notePreview(note.body);
-                const titleText = bodyOnly ? bodyText : note.title;
-
-                return (
-                  <Swipeable
-                    key={note.id}
-                    friction={1.1}
-                    rightThreshold={Math.min(120, Math.max(60, actionWidth * 0.25))}
-                    leftThreshold={Math.min(120, Math.max(60, actionWidth * 0.25))}
-                    overshootRight={false}
-                    overshootLeft={false}
-                    containerStyle={{ overflow: 'visible' }}
-                    childrenContainerStyle={{ overflow: 'visible' }}
-                    renderLeftActions={(_progress, dragX) => {
-                      if (!size) return null;
-                      const danger = dangerTone(colorScheme);
-                      const translateIn = dragX.interpolate({
-                        inputRange: [0, actionWidth],
-                        outputRange: [-actionWidth, 0],
-                        extrapolate: 'clamp',
-                      });
-
-                      return (
-                        <View
-                          style={[
-                            styles.leftActionContainer,
-                            { width: actionWidth, height: actionHeight, borderRadius: 18 },
-                          ]}
-                        >
-                          <Animated.View
-                            style={[
-                              styles.leftActionFill,
-                              {
-                                width: actionWidth,
-                                transform: [{ translateX: translateIn }],
-                                backgroundColor: danger.bg,
-                                borderColor: danger.border,
-                              },
-                            ]}
-                          >
-                            <ThemedText style={{ color: danger.text, fontSize: 13 }}>
-                              Delete
-                            </ThemedText>
-                          </Animated.View>
-                        </View>
-                      );
-                    }}
-                    onSwipeableOpen={(dir) => {
-                      if (dir === 'left') {
-                        deleteReviewedNote(note.id);
-                      }
-                    }}
-                  >
-                    <Pressable
-                      onLayout={onRowLayout(note.id)}
-                      accessibilityLabel={`Open note: ${note.title}`}
-                      onPress={() => {
-                        router.push({
-                          pathname: '/',
-                          params: { text: note.body, returnTo: '/explore', noteId: note.id },
-                        });
-                      }}
-                      style={({ pressed }) => [
-                        styles.noteCard,
-                        {
-                          backgroundColor: palette.surface,
-                          borderColor: palette.border,
-                          opacity: pressed ? 0.7 : 1,
-                        },
-                      ]}
-                    >
-                      <View style={styles.noteHeaderRow}>
-                        <ThemedText style={styles.noteTitle} numberOfLines={1}>
-                          {titleText}
-                        </ThemedText>
-                        {renderBucketPill(note)}
-                      </View>
-                      {bodyOnly ? null : (
-                        <ThemedText
-                          style={{ color: palette.muted, marginTop: 6 }}
-                          numberOfLines={2}
-                        >
-                          {bodyText}
-                        </ThemedText>
-                      )}
-                    </Pressable>
-                  </Swipeable>
-                );
-              })}
-
-              {filteredReviewed.length === 0 ? (
-                <View
-                  style={[
-                    styles.noteCard,
-                    { backgroundColor: palette.surfaceAlt, borderColor: palette.border },
-                  ]}
-                >
-                  <ThemedText style={{ color: palette.muted }}>
-                    {hydrated
-                      ? 'No reviewed notes match your search.'
-                      : 'Loading local notes...'}
-                  </ThemedText>
-                </View>
-              ) : null}
-            </View>
+          <View style={styles.cardStack}>
+            {libraryItems.map((item) =>
+              item.kind === 'weekly-review' ? renderWeeklyReview(item.review) : renderNote(item)
+            )}
+            {libraryItems.length === 0 ? (
+              <View style={[styles.emptyCard, { backgroundColor: palette.surfaceAlt, borderColor: palette.border }]}>
+                <ThemedText style={{ color: palette.muted, textAlign: 'center' }}>
+                  {hydrated ? 'Nothing matches this search.' : 'Loading your library…'}
+                </ThemedText>
+              </View>
+            ) : null}
           </View>
         </ScrollView>
       </ThemedView>
@@ -655,148 +415,26 @@ export default function LibraryScreen() {
 }
 
 const styles = StyleSheet.create({
-  screen: {
-    flex: 1,
-  },
-  scroll: {
-    flex: 1,
-  },
-  content: {
-    paddingHorizontal: 20,
-    gap: 16,
-    overflow: 'visible',
-  },
-  searchRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-  },
-  searchInputWrap: {
-    flex: 1,
-    borderRadius: 18,
-    borderWidth: 1,
-    paddingHorizontal: 14,
-    paddingVertical: 0,
-    justifyContent: 'center',
-    height: 40,
-  },
-  searchInput: {
-    fontSize: 15,
-    lineHeight: 18,
-    textAlignVertical: 'center',
-  },
-  bucketWrap: {
-    position: 'relative',
-    zIndex: 30,
-  },
-  bucketTrigger: {
-    borderWidth: 1,
-    borderRadius: 12,
-    paddingHorizontal: 10,
-    paddingVertical: 0,
-    height: 40,
-    minWidth: 92,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 8,
-  },
-  bucketMenu: {
-    position: 'absolute',
-    right: 0,
-    top: 48,
-    minWidth: 160,
-    borderWidth: 1,
-    borderRadius: 12,
-    paddingVertical: 6,
-    zIndex: 20,
-    shadowColor: '#000',
-    shadowOpacity: 0.12,
-    shadowRadius: 12,
-    shadowOffset: { width: 0, height: 6 },
-  },
-  bucketOption: {
-    paddingHorizontal: 10,
-    paddingVertical: 8,
-    borderWidth: 1,
-    borderRadius: 10,
-    marginVertical: 4,
-  },
-  section: {
-    gap: 12,
-    overflow: 'visible',
-  },
-  syncCard: {
-    minHeight: 48,
-    borderWidth: 1,
-    borderRadius: 16,
-    paddingHorizontal: 14,
-    paddingVertical: 9,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 12,
-  },
-  syncCopy: {
-    flex: 1,
-    gap: 2,
-  },
-  noteStack: {
-    gap: 12,
-    overflow: 'visible',
-  },
-  noteCard: {
-    borderRadius: 18,
-    borderWidth: 1,
-    padding: 14,
-  },
-  rightActionContainer: {
-    justifyContent: 'center',
-    alignItems: 'flex-end',
-    overflow: 'hidden',
-    borderRadius: 18,
-  },
-  rightActionFill: {
-    height: '100%',
-    borderWidth: 1,
-    borderRadius: 18,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 12,
-  },
-  leftActionContainer: {
-    justifyContent: 'center',
-    alignItems: 'flex-start',
-    overflow: 'hidden',
-    borderRadius: 18,
-  },
-  leftActionFill: {
-    height: '100%',
-    borderWidth: 1,
-    borderRadius: 18,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 12,
-  },
-  bucketPill: {
-    alignSelf: 'flex-start',
-    borderRadius: 999,
-    borderWidth: 1,
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-  },
-  noteHeaderRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  noteTitle: {
-    flex: 1,
-    paddingRight: 10,
-    fontSize: 15,
-    lineHeight: 18,
-    alignSelf: 'center',
-  },
-  noteBucketPill: {
-    alignSelf: 'center',
-  },
+  screen: { flex: 1 },
+  scroll: { flex: 1 },
+  content: { paddingHorizontal: 20, paddingTop: 12, gap: 16, overflow: 'visible' },
+  searchRow: { flexDirection: 'row', alignItems: 'center', gap: 10, zIndex: 20 },
+  searchInputWrap: { flex: 1, height: 42, borderRadius: 18, borderWidth: 1, paddingHorizontal: 14, justifyContent: 'center' },
+  searchInput: { fontSize: 15, lineHeight: 18 },
+  filterWrap: { position: 'relative', zIndex: 30 },
+  filterTrigger: { height: 42, minWidth: 112, maxWidth: 150, borderWidth: 1, borderRadius: 14, paddingHorizontal: 11, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8 },
+  filterMenu: { position: 'absolute', right: 0, top: 48, minWidth: 180, borderWidth: 1, borderRadius: 14, padding: 7, zIndex: 40, shadowColor: '#000', shadowOpacity: 0.12, shadowRadius: 12, shadowOffset: { width: 0, height: 6 } },
+  filterOption: { minHeight: 40, borderWidth: 1, borderRadius: 10, paddingHorizontal: 11, justifyContent: 'center', marginVertical: 3 },
+  sectionHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  cardStack: { gap: 12, overflow: 'visible' },
+  card: { borderRadius: 18, borderWidth: 1, padding: 14 },
+  cardHeader: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  cardTitle: { flex: 1, fontSize: 15, lineHeight: 19, fontWeight: '600' },
+  weeklyTitleWrap: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 8 },
+  pill: { maxWidth: 132, alignSelf: 'center', borderRadius: 999, borderWidth: 1, paddingHorizontal: 8, paddingVertical: 3 },
+  reviewPreview: { gap: 4, marginTop: 12 },
+  previewLabel: { marginTop: 4, fontSize: 11, fontWeight: '700', textTransform: 'uppercase', opacity: 0.6 },
+  swipeActionContainer: { justifyContent: 'center', overflow: 'hidden', borderRadius: 18 },
+  swipeActionFill: { height: '100%', borderWidth: 1, borderRadius: 18, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 12 },
+  emptyCard: { borderWidth: 1, borderRadius: 18, padding: 22 },
 });

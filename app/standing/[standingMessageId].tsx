@@ -21,6 +21,8 @@ export default function StandingMessageScreen() {
   const [text, setText] = useState(message?.text ?? '');
 
   useEffect(() => {
+    // Notes hydrate asynchronously, so keep the editor aligned when the selected note arrives.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setText(message?.text ?? '');
   }, [message?.text]);
 

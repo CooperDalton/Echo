@@ -3,6 +3,7 @@ import * as FileSystem from 'expo-file-system/legacy';
 import type { BucketName } from '@/constants/buckets';
 import {
   CHECK_IN_EMOTIONS,
+  DEFAULT_WEEKLY_REVIEW_PREFERENCES,
   DEFAULT_WIDGET_PREFERENCES,
   EMPTY_NOTES_STATE,
   type BucketDraft,
@@ -17,6 +18,8 @@ import {
   type NoteClassificationStatus,
   type NotesState,
   type StandingMessage,
+  type WeeklyReview,
+  type WeeklyReviewPreferences,
   type WidgetPreferences,
 } from '@/lib/notes/types';
 import { normalizeEchoSchedule } from '@/lib/widgets/schedule';
@@ -601,6 +604,8 @@ async function loadLegacyState(): Promise<NotesState> {
       bucketPreferences: EMPTY_NOTES_STATE.bucketPreferences,
       standingMessages: [],
       widgetPreferences: EMPTY_NOTES_STATE.widgetPreferences,
+      weeklyReviews: [],
+      weeklyReviewPreferences: EMPTY_NOTES_STATE.weeklyReviewPreferences,
     };
   } catch {
     return EMPTY_NOTES_STATE;
@@ -674,6 +679,75 @@ function normalizeCheckIn(value: unknown): CheckIn | null {
   };
 }
 
+function normalizeWeeklyReview(value: unknown): WeeklyReview | null {
+  if (!value || typeof value !== 'object') return null;
+  const review = value as Partial<WeeklyReview>;
+  if (
+    typeof review.id !== 'string' ||
+    typeof review.scheduledFor !== 'string' ||
+    typeof review.completedAt !== 'string' ||
+    typeof review.updatedAt !== 'string' ||
+    typeof review.reflection !== 'string' ||
+    typeof review.nextWeekIntent !== 'string'
+  ) {
+    return null;
+  }
+
+  if (
+    [review.scheduledFor, review.completedAt, review.updatedAt].some((date) =>
+      Number.isNaN(Date.parse(date))
+    )
+  ) {
+    return null;
+  }
+
+  const reflection = review.reflection.trim();
+  const nextWeekIntent = review.nextWeekIntent.trim();
+  if (!reflection || !nextWeekIntent) return null;
+
+  return { ...review, reflection, nextWeekIntent } as WeeklyReview;
+}
+
+function normalizeWeeklyReviewPreferences(value: unknown): WeeklyReviewPreferences {
+  if (!value || typeof value !== 'object') return DEFAULT_WEEKLY_REVIEW_PREFERENCES;
+  const preferences = value as Partial<WeeklyReviewPreferences>;
+  const startsAt =
+    typeof preferences.startsAt === 'string' && !Number.isNaN(Date.parse(preferences.startsAt))
+      ? preferences.startsAt
+      : null;
+  const updatedAt =
+    typeof preferences.updatedAt === 'string' && !Number.isNaN(Date.parse(preferences.updatedAt))
+      ? preferences.updatedAt
+      : null;
+
+  return {
+    enabled: preferences.enabled === true && startsAt !== null,
+    weekday:
+      typeof preferences.weekday === 'number' &&
+      Number.isInteger(preferences.weekday) &&
+      preferences.weekday >= 1 &&
+      preferences.weekday <= 7
+        ? preferences.weekday
+        : DEFAULT_WEEKLY_REVIEW_PREFERENCES.weekday,
+    hour:
+      typeof preferences.hour === 'number' &&
+      Number.isInteger(preferences.hour) &&
+      preferences.hour >= 0 &&
+      preferences.hour <= 23
+        ? preferences.hour
+        : DEFAULT_WEEKLY_REVIEW_PREFERENCES.hour,
+    minute:
+      typeof preferences.minute === 'number' &&
+      Number.isInteger(preferences.minute) &&
+      preferences.minute >= 0 &&
+      preferences.minute <= 59
+        ? preferences.minute
+        : DEFAULT_WEEKLY_REVIEW_PREFERENCES.minute,
+    startsAt,
+    updatedAt,
+  };
+}
+
 function normalizeNotesState(value: unknown): NotesState {
   if (!value || typeof value !== 'object') return EMPTY_NOTES_STATE;
   const parsed = value as Partial<NotesState>;
@@ -701,6 +775,12 @@ function normalizeNotesState(value: unknown): NotesState {
     ? parsed.checkIns
         .map(normalizeCheckIn)
         .filter((checkIn): checkIn is CheckIn => checkIn !== null)
+    : [];
+  const weeklyReviews = Array.isArray(parsed.weeklyReviews)
+    ? parsed.weeklyReviews
+        .map(normalizeWeeklyReview)
+        .filter((review): review is WeeklyReview => review !== null)
+        .sort((a, b) => b.scheduledFor.localeCompare(a.scheduledFor))
     : [];
 
   return {
@@ -732,6 +812,8 @@ function normalizeNotesState(value: unknown): NotesState {
           .sort((a, b) => a.createdAt.localeCompare(b.createdAt))
       : [],
     widgetPreferences: normalizeWidgetPreferences(parsed.widgetPreferences),
+    weeklyReviews,
+    weeklyReviewPreferences: normalizeWeeklyReviewPreferences(parsed.weeklyReviewPreferences),
   };
 }
 
@@ -784,6 +866,8 @@ export async function loadNotesState(): Promise<NotesState> {
         bucketPreferences,
         standingMessages,
         widgetPreferences: EMPTY_NOTES_STATE.widgetPreferences,
+        weeklyReviews: [],
+        weeklyReviewPreferences: EMPTY_NOTES_STATE.weeklyReviewPreferences,
       };
     }
 

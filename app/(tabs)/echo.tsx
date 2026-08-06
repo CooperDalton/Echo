@@ -138,6 +138,8 @@ export default function EchoScreen() {
     upsertStandingMessage,
     deleteStandingMessage,
     widgetPreferences,
+    weeklyReviews,
+    weeklyReviewPreferences,
     setWidgetEnabled,
     setWidgetStandingMessagesEnabled,
   } = useNotes();
@@ -271,8 +273,18 @@ export default function EchoScreen() {
           ...widgetPreferences,
           enabled: true,
         },
+        weeklyReviews,
+        weeklyReviewPreferences,
       }),
-    [bucketPreferences, recent, reviewed, standingMessages, widgetPreferences]
+    [
+      bucketPreferences,
+      recent,
+      reviewed,
+      standingMessages,
+      weeklyReviewPreferences,
+      weeklyReviews,
+      widgetPreferences,
+    ]
   );
   const echoQueue = useMemo(
     () =>

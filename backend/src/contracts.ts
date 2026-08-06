@@ -77,6 +77,24 @@ export type CheckIn = {
   filePath: string | null;
 };
 
+export type WeeklyReview = {
+  id: string;
+  scheduledFor: string;
+  completedAt: string;
+  updatedAt: string;
+  reflection: string;
+  nextWeekIntent: string;
+};
+
+export type WeeklyReviewPreferences = {
+  enabled: boolean;
+  weekday: number;
+  hour: number;
+  minute: number;
+  startsAt: string | null;
+  updatedAt: string | null;
+};
+
 export type NotesState = {
   recent: Note[];
   reviewed: Note[];
@@ -84,4 +102,6 @@ export type NotesState = {
   deletedNotes: DeletedNote[];
   bucketPreferences: BucketPreferences;
   standingMessages: StandingMessage[];
+  weeklyReviews: WeeklyReview[];
+  weeklyReviewPreferences: WeeklyReviewPreferences;
 };

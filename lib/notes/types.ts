@@ -97,6 +97,33 @@ export type CheckIn = {
   filePath: string | null;
 };
 
+export type WeeklyReview = {
+  id: string;
+  scheduledFor: string;
+  completedAt: string;
+  updatedAt: string;
+  reflection: string;
+  nextWeekIntent: string;
+};
+
+export type WeeklyReviewPreferences = {
+  enabled: boolean;
+  weekday: number;
+  hour: number;
+  minute: number;
+  startsAt: string | null;
+  updatedAt: string | null;
+};
+
+export const DEFAULT_WEEKLY_REVIEW_PREFERENCES: WeeklyReviewPreferences = {
+  enabled: false,
+  weekday: 1,
+  hour: 18,
+  minute: 0,
+  startsAt: null,
+  updatedAt: null,
+};
+
 export type NotesState = {
   recent: Note[];
   reviewed: Note[];
@@ -105,6 +132,8 @@ export type NotesState = {
   bucketPreferences: BucketPreferences;
   standingMessages: StandingMessage[];
   widgetPreferences: WidgetPreferences;
+  weeklyReviews: WeeklyReview[];
+  weeklyReviewPreferences: WeeklyReviewPreferences;
 };
 
 export const EMPTY_NOTES_STATE: NotesState = {
@@ -117,4 +146,6 @@ export const EMPTY_NOTES_STATE: NotesState = {
   },
   standingMessages: [],
   widgetPreferences: DEFAULT_WIDGET_PREFERENCES,
+  weeklyReviews: [],
+  weeklyReviewPreferences: DEFAULT_WEEKLY_REVIEW_PREFERENCES,
 };

@@ -1,4 +1,11 @@
-import type { BucketDraft, CheckIn, DeletedNote, Note, NotesState } from '@/lib/notes/types';
+import type {
+  BucketDraft,
+  CheckIn,
+  DeletedNote,
+  Note,
+  NotesState,
+  WeeklyReview,
+} from '@/lib/notes/types';
 import type {
   EchoSyncConfig,
   RemoteNoteClassification,
@@ -14,6 +21,8 @@ type SyncRequestBody = {
     deletedNotes: DeletedNote[];
     bucketPreferences: NotesState['bucketPreferences'];
     standingMessages: NotesState['standingMessages'];
+    weeklyReviews: WeeklyReview[];
+    weeklyReviewPreferences: NotesState['weeklyReviewPreferences'];
   };
 };
 
@@ -23,12 +32,16 @@ type SyncResponseBody = {
   deletedNotes?: DeletedNote[];
   bucketPreferences?: NotesState['bucketPreferences'];
   standingMessages?: NotesState['standingMessages'];
+  weeklyReviews?: WeeklyReview[];
+  weeklyReviewPreferences?: NotesState['weeklyReviewPreferences'];
   syncedAt?: string;
   summary?: {
     pushedNotes?: number;
     pushedCheckIns?: number;
     pulledNotes?: number;
     pulledCheckIns?: number;
+    pushedWeeklyReviews?: number;
+    pulledWeeklyReviews?: number;
   };
 };
 
@@ -92,6 +105,8 @@ export async function syncRemoteSnapshot(
       deletedNotes: state.deletedNotes,
       bucketPreferences: state.bucketPreferences,
       standingMessages: state.standingMessages,
+      weeklyReviews: state.weeklyReviews,
+      weeklyReviewPreferences: state.weeklyReviewPreferences,
     },
   };
 
@@ -106,6 +121,9 @@ export async function syncRemoteSnapshot(
       bucketPreferences: response.bucketPreferences ?? payload.snapshot.bucketPreferences,
       standingMessages: response.standingMessages ?? payload.snapshot.standingMessages,
       widgetPreferences: state.widgetPreferences,
+      weeklyReviews: response.weeklyReviews ?? payload.snapshot.weeklyReviews,
+      weeklyReviewPreferences:
+        response.weeklyReviewPreferences ?? payload.snapshot.weeklyReviewPreferences,
     },
     syncedAt: response.syncedAt ?? new Date().toISOString(),
     summary: {
@@ -113,6 +131,10 @@ export async function syncRemoteSnapshot(
       pushedCheckIns: response.summary?.pushedCheckIns ?? payload.snapshot.checkIns.length,
       pulledNotes: response.summary?.pulledNotes ?? response.notes?.length ?? 0,
       pulledCheckIns: response.summary?.pulledCheckIns ?? response.checkIns?.length ?? 0,
+      pushedWeeklyReviews:
+        response.summary?.pushedWeeklyReviews ?? payload.snapshot.weeklyReviews.length,
+      pulledWeeklyReviews:
+        response.summary?.pulledWeeklyReviews ?? response.weeklyReviews?.length ?? 0,
     },
   };
 }

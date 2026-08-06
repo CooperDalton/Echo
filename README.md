@@ -1,10 +1,11 @@
 # Echo
 
-Echo is a local-first personal notes and reflection app built with Expo. The app keeps a local JSON cache on device and syncs notes, check-ins, bucket preferences, standing messages, and note deletion tombstones through the Vercel backend into Supabase.
+Echo is a local-first personal notes and reflection app built with Expo. The app keeps a local JSON cache on device and syncs notes, check-ins, weekly reviews, reflection preferences, bucket preferences, standing messages, and note deletion tombstones through the Vercel backend into Supabase.
 
 ## Current Capabilities
 
 - Capture notes and check-ins locally.
+- Schedule a weekly review, receive a local reminder, and revisit or edit past reviews.
 - Surface due Echo cards from note scheduling metadata.
 - Classify notes and shorten widget text through the backend.
 - Sync local snapshots to Supabase.
@@ -45,6 +46,8 @@ The database schema lives in [supabase/schema.sql](/C:/Users/wizdr/Desktop/Code/
 - `bucket_preferences`
 - `standing_messages`
 - `sync_devices`
+- `weekly_reviews`
+- `weekly_review_preferences`
 
 RLS is enabled on all public tables. The mobile app does not query Supabase directly; the backend uses the service role key.
 
@@ -99,7 +102,16 @@ Request:
     "bucketPreferences": {
       "customs": []
     },
-    "standingMessages": []
+    "standingMessages": [],
+    "weeklyReviews": [],
+    "weeklyReviewPreferences": {
+      "enabled": false,
+      "weekday": 1,
+      "hour": 18,
+      "minute": 0,
+      "startsAt": null,
+      "updatedAt": null
+    }
   }
 }
 ```
@@ -120,12 +132,23 @@ Response:
     "customs": []
   },
   "standingMessages": [],
+  "weeklyReviews": [],
+  "weeklyReviewPreferences": {
+    "enabled": false,
+    "weekday": 1,
+    "hour": 18,
+    "minute": 0,
+    "startsAt": null,
+    "updatedAt": null
+  },
   "syncedAt": "2026-04-30T19:45:00-07:00",
   "summary": {
     "pushedNotes": 14,
     "pushedCheckIns": 3,
     "pulledNotes": 2,
     "pulledCheckIns": 0,
+    "pushedWeeklyReviews": 4,
+    "pulledWeeklyReviews": 4,
     "storedRows": 20
   }
 }

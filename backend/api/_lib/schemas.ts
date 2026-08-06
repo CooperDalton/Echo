@@ -1,6 +1,16 @@
 import { z } from 'zod';
 
-import { CHECK_IN_EMOTIONS, type BucketDraft, type BucketPreferences, type CheckIn, type DeletedNote, type Note, type StandingMessage } from '../../src/contracts';
+import {
+  CHECK_IN_EMOTIONS,
+  type BucketDraft,
+  type BucketPreferences,
+  type CheckIn,
+  type DeletedNote,
+  type Note,
+  type StandingMessage,
+  type WeeklyReview,
+  type WeeklyReviewPreferences,
+} from '../../src/contracts';
 
 export const noteSchema = z.object({
   id: z.string().min(1),
@@ -55,6 +65,24 @@ export const standingMessageSchema = z.object({
   updatedAt: z.string().min(1),
 }) satisfies z.ZodType<StandingMessage>;
 
+export const weeklyReviewSchema = z.object({
+  id: z.string().min(1),
+  scheduledFor: z.string().datetime(),
+  completedAt: z.string().datetime(),
+  updatedAt: z.string().datetime(),
+  reflection: z.string().trim().min(1),
+  nextWeekIntent: z.string().trim().min(1),
+}) satisfies z.ZodType<WeeklyReview>;
+
+export const weeklyReviewPreferencesSchema = z.object({
+  enabled: z.boolean(),
+  weekday: z.number().int().min(1).max(7),
+  hour: z.number().int().min(0).max(23),
+  minute: z.number().int().min(0).max(59),
+  startsAt: z.string().datetime().nullable(),
+  updatedAt: z.string().datetime().nullable(),
+}) satisfies z.ZodType<WeeklyReviewPreferences>;
+
 export const bucketDraftSchema = z.object({
   name: z.string().min(1),
   description: z.string(),
@@ -99,5 +127,14 @@ export const syncRequestSchema = z.object({
     deletedNotes: z.array(deletedNoteSchema).default([]),
     bucketPreferences: bucketPreferencesSchema.default({ customs: [] }),
     standingMessages: z.array(standingMessageSchema).default([]),
+    weeklyReviews: z.array(weeklyReviewSchema).default([]),
+    weeklyReviewPreferences: weeklyReviewPreferencesSchema.default({
+      enabled: false,
+      weekday: 1,
+      hour: 18,
+      minute: 0,
+      startsAt: null,
+      updatedAt: null,
+    }),
   }),
 });

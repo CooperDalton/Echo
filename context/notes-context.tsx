@@ -32,6 +32,8 @@ import {
   type Note,
   type NotesState,
   type StandingMessage,
+  type WeeklyReview,
+  type WeeklyReviewPreferences,
   type WidgetPreferences,
 } from '@/lib/notes/types';
 import { loadSyncConfig, syncPendingReason } from '@/lib/sync/config';
@@ -49,12 +51,18 @@ type NotesContextValue = {
   bucketPreferences: BucketPreferences;
   standingMessages: StandingMessage[];
   widgetPreferences: WidgetPreferences;
+  weeklyReviews: WeeklyReview[];
+  weeklyReviewPreferences: WeeklyReviewPreferences;
   syncConfig: EchoSyncConfig | null;
   syncStatus: SyncStatus;
   addRecentNote: (body: string, options?: { echoEnabled?: boolean }) => void;
   updateNote: (noteId: string, body: string, options?: { echoEnabled?: boolean }) => void;
   addCheckIn: (input: AddCheckInInput) => void;
   updateCheckIn: (checkInId: string, input: UpdateCheckInInput) => void;
+  addWeeklyReview: (input: AddWeeklyReviewInput) => WeeklyReview | null;
+  updateWeeklyReview: (reviewId: string, input: UpdateWeeklyReviewInput) => void;
+  setWeeklyReviewSchedule: (input: WeeklyReviewScheduleInput) => void;
+  disableWeeklyReviewSchedule: () => void;
   markNoteAsReviewed: (noteId: string) => void;
   deleteRecentNote: (noteId: string) => void;
   deleteReviewedNote: (noteId: string) => void;
@@ -85,6 +93,23 @@ export type UpdateCheckInInput = {
   energy: number;
   emotions: Record<CheckInEmotion, boolean>;
   body: string;
+};
+
+export type AddWeeklyReviewInput = {
+  scheduledFor: string;
+  reflection: string;
+  nextWeekIntent: string;
+};
+
+export type UpdateWeeklyReviewInput = {
+  reflection: string;
+  nextWeekIntent: string;
+};
+
+export type WeeklyReviewScheduleInput = {
+  weekday: number;
+  hour: number;
+  minute: number;
 };
 
 function createNoteTitle(body: string): string {
@@ -175,6 +200,23 @@ function createCheckIn(input: AddCheckInInput): CheckIn {
   return {
     ...checkIn,
     filePath: createCheckInFilePath(checkIn),
+  };
+}
+
+function createWeeklyReview(input: AddWeeklyReviewInput): WeeklyReview | null {
+  const reflection = input.reflection.trim();
+  const nextWeekIntent = input.nextWeekIntent.trim();
+  const scheduledFor = new Date(input.scheduledFor);
+  if (!reflection || !nextWeekIntent || Number.isNaN(scheduledFor.getTime())) return null;
+
+  const completedAt = new Date().toISOString();
+  return {
+    id: `weekly-review-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    scheduledFor: scheduledFor.toISOString(),
+    completedAt,
+    updatedAt: completedAt,
+    reflection,
+    nextWeekIntent,
   };
 }
 
@@ -561,6 +603,88 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     markDirtyAndScheduleSync();
   }, [commitState, markDirtyAndScheduleSync]);
 
+  const addWeeklyReview = useCallback((input: AddWeeklyReviewInput): WeeklyReview | null => {
+    const review = createWeeklyReview(input);
+    if (!review) return null;
+
+    commitState((prev) => {
+      const existing = prev.weeklyReviews.find(
+        (item) => item.scheduledFor === review.scheduledFor
+      );
+      const nextReview = existing
+        ? {
+            ...existing,
+            reflection: review.reflection,
+            nextWeekIntent: review.nextWeekIntent,
+            updatedAt: review.updatedAt,
+          }
+        : review;
+
+      return {
+        ...prev,
+        weeklyReviews: [
+          nextReview,
+          ...prev.weeklyReviews.filter((item) => item.id !== nextReview.id),
+        ].sort((left, right) => right.scheduledFor.localeCompare(left.scheduledFor)),
+      };
+    });
+    markDirtyAndScheduleSync();
+    return review;
+  }, [commitState, markDirtyAndScheduleSync]);
+
+  const updateWeeklyReview = useCallback((reviewId: string, input: UpdateWeeklyReviewInput) => {
+    const reflection = input.reflection.trim();
+    const nextWeekIntent = input.nextWeekIntent.trim();
+    if (!reflection || !nextWeekIntent) return;
+
+    commitState((prev) => ({
+      ...prev,
+      weeklyReviews: prev.weeklyReviews.map((review) =>
+        review.id === reviewId
+          ? {
+              ...review,
+              reflection,
+              nextWeekIntent,
+              updatedAt: new Date().toISOString(),
+            }
+          : review
+      ),
+    }));
+    markDirtyAndScheduleSync();
+  }, [commitState, markDirtyAndScheduleSync]);
+
+  const setWeeklyReviewSchedule = useCallback((input: WeeklyReviewScheduleInput) => {
+    const weekday = Math.min(7, Math.max(1, Math.round(input.weekday)));
+    const hour = Math.min(23, Math.max(0, Math.round(input.hour)));
+    const minute = Math.min(59, Math.max(0, Math.round(input.minute)));
+    const now = new Date().toISOString();
+
+    commitState((prev) => ({
+      ...prev,
+      weeklyReviewPreferences: {
+        enabled: true,
+        weekday,
+        hour,
+        minute,
+        startsAt: now,
+        updatedAt: now,
+      },
+    }));
+    markDirtyAndScheduleSync();
+  }, [commitState, markDirtyAndScheduleSync]);
+
+  const disableWeeklyReviewSchedule = useCallback(() => {
+    commitState((prev) => ({
+      ...prev,
+      weeklyReviewPreferences: {
+        ...prev.weeklyReviewPreferences,
+        enabled: false,
+        updatedAt: new Date().toISOString(),
+      },
+    }));
+    markDirtyAndScheduleSync();
+  }, [commitState, markDirtyAndScheduleSync]);
+
   const markNoteAsReviewed = useCallback((noteId: string) => {
     commitState((prev) => {
       const note =
@@ -783,12 +907,18 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       bucketPreferences: state.bucketPreferences,
       standingMessages: state.standingMessages,
       widgetPreferences: state.widgetPreferences,
+      weeklyReviews: state.weeklyReviews,
+      weeklyReviewPreferences: state.weeklyReviewPreferences,
       syncConfig,
       syncStatus,
       addRecentNote,
       updateNote,
       addCheckIn,
       updateCheckIn,
+      addWeeklyReview,
+      updateWeeklyReview,
+      setWeeklyReviewSchedule,
+      disableWeeklyReviewSchedule,
       markNoteAsReviewed,
       deleteRecentNote,
       deleteReviewedNote,
@@ -809,12 +939,18 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       state.bucketPreferences,
       state.standingMessages,
       state.widgetPreferences,
+      state.weeklyReviews,
+      state.weeklyReviewPreferences,
       syncConfig,
       syncStatus,
       addRecentNote,
       updateNote,
       addCheckIn,
       updateCheckIn,
+      addWeeklyReview,
+      updateWeeklyReview,
+      setWeeklyReviewSchedule,
+      disableWeeklyReviewSchedule,
       markNoteAsReviewed,
       deleteRecentNote,
       deleteReviewedNote,
