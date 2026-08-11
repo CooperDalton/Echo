@@ -4,6 +4,7 @@ struct LibraryView: View {
     @Environment(EchoStore.self) private var store
     @State private var searchQuery = ""
     @State private var selectedBucket = "All"
+    @FocusState private var searchIsFocused: Bool
 
     private var customBuckets: [BucketDraft] { store.state.bucketPreferences.customs }
 
@@ -21,10 +22,13 @@ struct LibraryView: View {
         NavigationStack(path: $store.libraryPath) {
             ScrollView {
                 VStack(spacing: 16) {
-                    syncCard
                     searchRow
-                    notesSection(title: "Recent Notes", notes: filteredRecent, reviewed: false)
-                    notesSection(title: "Notes", notes: filteredReviewed, reviewed: true)
+                    VStack(spacing: 16) {
+                        notesSection(title: "Recent Notes", notes: filteredRecent, reviewed: false)
+                        notesSection(title: "Notes", notes: filteredReviewed, reviewed: true)
+                    }
+                    .contentShape(.rect)
+                    .onTapGesture { searchIsFocused = false }
                 }
                 .padding(.horizontal, 20)
                 .padding(.bottom, 28)
@@ -42,42 +46,6 @@ struct LibraryView: View {
         }
     }
 
-    private var syncCard: some View {
-        Button {
-            Task { await store.syncNow() }
-        } label: {
-            HStack(spacing: 12) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(syncLabel)
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(EchoTheme.textPrimary)
-                    if let detail = store.syncStatus.lastError ?? syncPendingReason {
-                        Text(detail)
-                            .font(.system(size: 11))
-                            .foregroundStyle(EchoTheme.textSecondary)
-                            .lineLimit(1)
-                    }
-                }
-                Spacer()
-                Text(store.syncStatus.isSyncing ? "Please wait" : "Sync now")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(EchoTheme.accent)
-            }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 9)
-            .frame(minHeight: 48)
-            .background(EchoTheme.surfaceRaised, in: .rect(cornerRadius: 16, style: .continuous))
-            .overlay {
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .stroke(store.syncStatus.lastError == nil ? EchoTheme.border : EchoTheme.danger, lineWidth: 1)
-            }
-        }
-        .buttonStyle(.plain)
-        .disabled(store.syncStatus.isSyncing || !store.config.isConfigured)
-        .opacity(store.syncStatus.isSyncing || !store.config.isConfigured ? 0.7 : 1)
-        .accessibilityLabel("Sync notes now")
-    }
-
     private var searchRow: some View {
         HStack(spacing: 10) {
             TextField("Search notes", text: $searchQuery)
@@ -85,28 +53,41 @@ struct LibraryView: View {
                 .foregroundStyle(EchoTheme.textPrimary)
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
+                .submitLabel(.search)
+                .focused($searchIsFocused)
+                .onSubmit { searchIsFocused = false }
                 .padding(.horizontal, 14)
                 .frame(height: 40)
                 .background(EchoTheme.surface, in: .rect(cornerRadius: 18, style: .continuous))
                 .overlay { RoundedRectangle(cornerRadius: 18).stroke(EchoTheme.border, lineWidth: 1) }
 
             Menu {
-                Button("All") { selectedBucket = "All" }
-                ForEach(customBuckets, id: \.name) { bucket in
-                    Button(bucket.name) { selectedBucket = bucket.name }
+                Button("All") {
+                    selectedBucket = "All"
+                    searchIsFocused = false
                 }
-                Button("Unbucketed") { selectedBucket = "Unbucketed" }
+                ForEach(customBuckets, id: \.name) { bucket in
+                    Button(bucket.name) {
+                        selectedBucket = bucket.name
+                        searchIsFocused = false
+                    }
+                }
+                Button("Unbucketed") {
+                    selectedBucket = "Unbucketed"
+                    searchIsFocused = false
+                }
             } label: {
-                HStack(spacing: 8) {
-                    Text(selectedBucket).lineLimit(1)
-                    Spacer(minLength: 0)
+                HStack(spacing: 6) {
+                    Text(selectedBucket)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
                     Image(systemName: "chevron.down")
                         .font(.system(size: 10, weight: .semibold))
                 }
                 .font(.system(size: 13))
                 .foregroundStyle(selectedBucketTone.text)
                 .padding(.horizontal, 10)
-                .frame(minWidth: 92, minHeight: 40)
+                .frame(minWidth: 72, maxWidth: 112, minHeight: 40)
                 .background(selectedBucketTone.background, in: .rect(cornerRadius: 12, style: .continuous))
                 .overlay { RoundedRectangle(cornerRadius: 12).stroke(selectedBucketTone.border, lineWidth: 1) }
             }
@@ -144,27 +125,6 @@ struct LibraryView: View {
                 }
             }
         }
-    }
-
-    private var syncLabel: String {
-        if store.syncStatus.isSyncing { return "Syncing…" }
-        if store.syncStatus.lastError != nil { return "Sync failed" }
-        if !store.config.isConfigured { return "Sync needs setup" }
-        guard let raw = store.syncStatus.lastSyncedAt,
-              let date = ISO8601DateFormatter.echo.date(from: raw)
-        else { return "Ready to sync" }
-        return "Synced \(date.formatted(date: .omitted, time: .shortened))"
-    }
-
-    private var syncPendingReason: String? {
-        if !store.config.syncEnabled { return "Sync is disabled on this device." }
-        if store.config.apiBaseUrl?.isEmpty != false {
-            return "Set EXPO_PUBLIC_ECHO_API_URL to reach your backend."
-        }
-        if store.config.apiToken?.isEmpty != false {
-            return "Set EXPO_PUBLIC_ECHO_API_TOKEN to authenticate with your backend."
-        }
-        return nil
     }
 
     private var selectedBucketTone: BucketTone {

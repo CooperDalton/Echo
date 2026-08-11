@@ -104,8 +104,6 @@ private struct CheckInHistoryCard: View {
                     .font(.system(size: 18))
                     .foregroundStyle(EchoTheme.accent)
                     .frame(width: 28, height: 28)
-                    .background(EchoTheme.surfaceRaised, in: .circle)
-                    .overlay { Circle().stroke(EchoTheme.border, lineWidth: 1) }
 
                 Text(checkIn.body.isEmpty
                      ? primaryEmotion?.capitalized ?? "Check-in"

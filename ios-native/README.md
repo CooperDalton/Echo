@@ -20,14 +20,29 @@ xcodebuild -project Echo.xcodeproj -scheme Echo \
 
 If this checkout is stored in an iCloud/File Provider folder, let Xcode use its default Derived Data location or use a temporary path outside the checkout. Extended Finder metadata can otherwise interfere with simulator code signing.
 
-Open `Echo.xcodeproj` to select an Apple development team before installing on a physical iPhone.
+The project is configured for Cooper's Apple development team (`TC5U393653`).
+Xcode can therefore manage signing automatically when that account is signed in.
 
-Like the Expo build, supply `EXPO_PUBLIC_ECHO_API_URL` and
-`EXPO_PUBLIC_ECHO_API_TOKEN` as build settings. For example, append both values
-to the `xcodebuild` command or add them as user-defined build settings in Xcode.
-They initialize the Expo-compatible `echo-config-v1.json`; the Supabase
-service-role key remains server-only. Local capture, check-ins, categories,
-standing messages, and the widget work without backend setup.
+## Install on Cooper's iPhone
+
+1. In Xcode, open **Xcode > Settings > Accounts** and sign in with the Apple ID
+   that owns team `TC5U393653`. Xcode needs the account once to create the app
+   and widget provisioning profiles; a matching development certificate is
+   already present in this Mac's Keychain.
+2. Keep the paired iPhone unlocked, then open `Echo.xcodeproj`, choose
+   **iPhone (66)** as the run destination, and press **Run**. Developer Mode is
+   already enabled on the phone. If iOS asks whether to trust the developer,
+   approve the prompt and run once more.
+
+The device is already paired with this Mac and detected by Xcode. No App Store,
+TestFlight, Expo Go, backend deployment, or API keys are required for this
+personal installation.
+
+The backend is optional. Local capture, check-ins, categories, standing
+messages, and the widget work without any API configuration. Cloud sync and
+server-side classification remain dormant unless `EXPO_PUBLIC_ECHO_API_URL` and
+`EXPO_PUBLIC_ECHO_API_TOKEN` are supplied as build settings. The Supabase
+service-role key remains server-only.
 
 ## Compatibility promises
 
