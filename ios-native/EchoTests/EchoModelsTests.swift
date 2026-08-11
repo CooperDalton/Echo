@@ -42,6 +42,8 @@ struct EchoModelsTests {
         #expect(state.recent.first?.id == "note-1")
         #expect(state.recent.first?.classificationStatus == .pending)
         #expect(state.widgetPreferences.includeStandingMessages)
+        #expect(state.weeklyReviewPreferences == .default)
+        #expect(state.dailyCheckInPreferences == .default)
     }
 
     @Test func persistenceUsesExpoFilenamesAndRoundTrips() throws {
@@ -79,6 +81,125 @@ struct EchoModelsTests {
         #expect(first.scheduledDates.count == 6)
         #expect(first.scheduledDates == second.scheduledDates)
         #expect(first.scheduledDates.first == "2026-08-11")
+    }
+
+    @Test func weeklyReviewUsesConfiguredWeekdayAndStopsBeingPendingAfterCompletion() throws {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = try #require(TimeZone(identifier: "America/Los_Angeles"))
+        let startsAt = try #require(calendar.date(from: DateComponents(
+            year: 2026,
+            month: 8,
+            day: 1,
+            hour: 12
+        )))
+        let now = try #require(calendar.date(from: DateComponents(
+            year: 2026,
+            month: 8,
+            day: 9,
+            hour: 20
+        )))
+        let preferences = WeeklyReviewPreferences(
+            enabled: true,
+            weekday: 1,
+            hour: 18,
+            minute: 0,
+            startsAt: ISO8601DateFormatter.echo.string(from: startsAt),
+            updatedAt: ISO8601DateFormatter.echo.string(from: startsAt)
+        )
+        let occurrence = try #require(ReflectionScheduler.pendingWeeklyReviewOccurrence(
+            preferences: preferences,
+            reviews: [],
+            now: now,
+            calendar: calendar
+        ))
+        #expect(calendar.component(.weekday, from: occurrence) == 1)
+        #expect(calendar.component(.hour, from: occurrence) == 18)
+
+        let completed = WeeklyReview(
+            id: "weekly-review-test",
+            scheduledFor: ISO8601DateFormatter.echo.string(from: occurrence),
+            completedAt: ISO8601DateFormatter.echo.string(from: now),
+            updatedAt: ISO8601DateFormatter.echo.string(from: now),
+            reflection: "A good week",
+            nextWeekIntent: "Keep going"
+        )
+        #expect(ReflectionScheduler.pendingWeeklyReviewOccurrence(
+            preferences: preferences,
+            reviews: [completed],
+            now: now,
+            calendar: calendar
+        ) == nil)
+    }
+
+    @Test func eachDailyTimeCanBecomeDueAfterAnEarlierCheckIn() throws {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = try #require(TimeZone(identifier: "America/Los_Angeles"))
+        func date(hour: Int, minute: Int) throws -> Date {
+            try #require(calendar.date(from: DateComponents(
+                year: 2026,
+                month: 8,
+                day: 10,
+                hour: hour,
+                minute: minute
+            )))
+        }
+        let preferences = DailyCheckInPreferences(
+            enabled: true,
+            times: [ReminderTime(hour: 9, minute: 0), ReminderTime(hour: 20, minute: 0)],
+            updatedAt: nil
+        )
+        let morningCheckIn = CheckIn(
+            id: "morning",
+            createdAt: ISO8601DateFormatter.echo.string(from: try date(hour: 9, minute: 30)),
+            kind: .evening,
+            source: .mobile,
+            energy: 3,
+            emotions: [:],
+            body: "Morning",
+            filePath: nil
+        )
+        let due = try #require(ReflectionScheduler.pendingDailyCheckIn(
+            preferences: preferences,
+            checkIns: [morningCheckIn],
+            now: try date(hour: 20, minute: 30),
+            calendar: calendar
+        ))
+        #expect(calendar.component(.hour, from: due) == 20)
+    }
+
+    @Test func dailyCheckInEnabledStateFollowsWhetherTimesExist() {
+        let staleDisabledValue = DailyCheckInPreferences(
+            enabled: false,
+            times: [.evening],
+            updatedAt: nil
+        )
+        let staleEnabledValue = DailyCheckInPreferences(
+            enabled: true,
+            times: [],
+            updatedAt: nil
+        )
+
+        #expect(staleDisabledValue.normalized.enabled)
+        #expect(!staleEnabledValue.normalized.enabled)
+    }
+
+    @Test @MainActor func foregroundReminderDoesNotReplaceAnOpenCheckIn() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let store = EchoStore(persistence: EchoPersistence(directory: directory))
+        store.state.dailyCheckInPreferences = DailyCheckInPreferences(
+            enabled: true,
+            times: [ReminderTime(hour: 0, minute: 0)],
+            updatedAt: nil
+        )
+        store.isCheckInFlowPresented = true
+        let selectedTab = store.selectedTab
+
+        store.presentDueReflectionIfNeeded(now: Date(timeIntervalSince1970: 1_786_321_200))
+
+        #expect(store.isCheckInFlowPresented)
+        #expect(store.weeklyReviewPresentation == nil)
+        #expect(store.selectedTab == selectedTab)
     }
 
     @Test func widgetEntriesKeepExistingDeepLinkShape() {

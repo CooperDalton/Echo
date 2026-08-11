@@ -1,6 +1,7 @@
 import type {
   BucketPreferences,
   CheckIn,
+  DailyCheckInPreferences,
   DeletedNote,
   Note,
   NotesState,
@@ -88,12 +89,25 @@ type WeeklyReviewPreferencesRow = {
   updated_at: string | null;
 };
 
+type DailyCheckInPreferencesRow = {
+  id: 'default';
+  enabled: boolean;
+  times: DailyCheckInPreferences['times'];
+  updated_at: string | null;
+};
+
 const DEFAULT_WEEKLY_REVIEW_PREFERENCES: WeeklyReviewPreferences = {
   enabled: false,
   weekday: 1,
   hour: 18,
   minute: 0,
   startsAt: null,
+  updatedAt: null,
+};
+
+const DEFAULT_DAILY_CHECK_IN_PREFERENCES: DailyCheckInPreferences = {
+  enabled: true,
+  times: [{ hour: 20, minute: 0 }],
   updatedAt: null,
 };
 
@@ -159,6 +173,15 @@ function mergeWeeklyReviewPreferences(
   local: WeeklyReviewPreferences,
   remote: WeeklyReviewPreferences
 ): WeeklyReviewPreferences {
+  if (!local.updatedAt) return remote;
+  if (!remote.updatedAt) return local;
+  return compareIsoDates(local.updatedAt, remote.updatedAt) >= 0 ? local : remote;
+}
+
+function mergeDailyCheckInPreferences(
+  local: DailyCheckInPreferences,
+  remote: DailyCheckInPreferences
+): DailyCheckInPreferences {
   if (!local.updatedAt) return remote;
   if (!remote.updatedAt) return local;
   return compareIsoDates(local.updatedAt, remote.updatedAt) >= 0 ? local : remote;
@@ -321,6 +344,17 @@ function weeklyReviewPreferencesFromRow(
   };
 }
 
+function dailyCheckInPreferencesFromRow(
+  row: DailyCheckInPreferencesRow | null
+): DailyCheckInPreferences {
+  if (!row) return DEFAULT_DAILY_CHECK_IN_PREFERENCES;
+  return {
+    enabled: row.enabled,
+    times: row.times,
+    updatedAt: row.updated_at,
+  };
+}
+
 async function readTable<T>(table: string, orderColumn: string): Promise<T[]> {
   const { data, error } = await supabase.from(table).select('*').order(orderColumn, {
     ascending: false,
@@ -339,6 +373,7 @@ async function loadSupabaseSnapshot(): Promise<NotesState> {
     standingMessageRows,
     weeklyReviewRows,
     weeklyReviewPreferencesRows,
+    dailyCheckInPreferencesRows,
   ] =
     await Promise.all([
       readTable<NoteRow>('notes', 'created_at'),
@@ -348,11 +383,13 @@ async function loadSupabaseSnapshot(): Promise<NotesState> {
       supabase.from('standing_messages').select('*').order('created_at', { ascending: true }),
       readTable<WeeklyReviewRow>('weekly_reviews', 'scheduled_for'),
       supabase.from('weekly_review_preferences').select('*').eq('id', 'default').maybeSingle(),
+      supabase.from('daily_check_in_preferences').select('*').eq('id', 'default').maybeSingle(),
     ]);
 
   if (bucketPreferencesRows.error) throw bucketPreferencesRows.error;
   if (standingMessageRows.error) throw standingMessageRows.error;
   if (weeklyReviewPreferencesRows.error) throw weeklyReviewPreferencesRows.error;
+  if (dailyCheckInPreferencesRows.error) throw dailyCheckInPreferencesRows.error;
 
   const deletedNotes = deletedNoteRows.map(deletedNoteFromRow);
   const deletedIds = new Set(deletedNotes.map((deletedNote) => deletedNote.id));
@@ -373,6 +410,9 @@ async function loadSupabaseSnapshot(): Promise<NotesState> {
     weeklyReviews: weeklyReviewRows.map(weeklyReviewFromRow),
     weeklyReviewPreferences: weeklyReviewPreferencesFromRow(
       weeklyReviewPreferencesRows.data as WeeklyReviewPreferencesRow | null
+    ),
+    dailyCheckInPreferences: dailyCheckInPreferencesFromRow(
+      dailyCheckInPreferencesRows.data as DailyCheckInPreferencesRow | null
     ),
   };
 }
@@ -431,6 +471,20 @@ async function persistSupabaseSnapshot(state: NotesState, deviceId: string): Pro
   if (weeklyReviewPreferencesError) throw weeklyReviewPreferencesError;
   storedRows += 1;
 
+  const { error: dailyCheckInPreferencesError } = await supabase
+    .from('daily_check_in_preferences')
+    .upsert(
+      {
+        id: 'default',
+        enabled: state.dailyCheckInPreferences.enabled,
+        times: state.dailyCheckInPreferences.times,
+        updated_at: state.dailyCheckInPreferences.updatedAt,
+      },
+      { onConflict: 'id' }
+    );
+  if (dailyCheckInPreferencesError) throw dailyCheckInPreferencesError;
+  storedRows += 1;
+
   const { error: deviceError } = await supabase.from('sync_devices').upsert(
     {
       id: deviceId,
@@ -467,6 +521,10 @@ export async function syncSupabaseSnapshot(
     state.weeklyReviewPreferences,
     remote.weeklyReviewPreferences
   );
+  const mergedDailyCheckInPreferences = mergeDailyCheckInPreferences(
+    state.dailyCheckInPreferences,
+    remote.dailyCheckInPreferences
+  );
 
   const mergedState: NotesState = {
     recent: mergedNotes.filter((note) => note.echo.state !== 'reviewed'),
@@ -477,6 +535,7 @@ export async function syncSupabaseSnapshot(
     standingMessages: mergedStandingMessages,
     weeklyReviews: mergedWeeklyReviews,
     weeklyReviewPreferences: mergedWeeklyReviewPreferences,
+    dailyCheckInPreferences: mergedDailyCheckInPreferences,
   };
   const storedRows = await persistSupabaseSnapshot(mergedState, deviceId);
 

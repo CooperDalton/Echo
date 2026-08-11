@@ -36,6 +36,7 @@ struct EchoQueueView: View {
                     VStack(spacing: 24) {
                         categoriesSection
                         todaySection
+                        remindersSection
                         widgetSection
                         standingMessagesSection
                         queueSection
@@ -176,6 +177,124 @@ struct EchoQueueView: View {
         }
     }
 
+    private var remindersSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            sectionTitle("Reminders")
+
+            VStack(spacing: 0) {
+                Text("Daily check-in")
+                    .font(.system(size: 15, weight: .medium))
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(14)
+
+                Divider().overlay(EchoTheme.border)
+                VStack(spacing: 0) {
+                    ForEach(Array(store.state.dailyCheckInPreferences.times.enumerated()), id: \.element.id) {
+                        index, _ in
+                        HStack {
+                            DatePicker(
+                                "Time \(index + 1)",
+                                selection: dailyTimeBinding(at: index),
+                                displayedComponents: .hourAndMinute
+                            )
+                            .datePickerStyle(.compact)
+                            .tint(EchoTheme.accent)
+
+                            Button {
+                                store.deleteDailyCheckInTime(at: index)
+                            } label: {
+                                Image(systemName: "minus.circle.fill")
+                                    .font(.system(size: 18))
+                                    .foregroundStyle(EchoTheme.textSecondary)
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityLabel("Remove time \(index + 1)")
+                        }
+                        .padding(.horizontal, 14)
+                        .frame(minHeight: 48)
+
+                        if index < store.state.dailyCheckInPreferences.times.count - 1 {
+                            Divider().overlay(EchoTheme.border).padding(.leading, 14)
+                        }
+                    }
+
+                    if store.state.dailyCheckInPreferences.times.count < 5 {
+                        Button {
+                            store.addDailyCheckInTime()
+                        } label: {
+                            Text("+ Add time")
+                                .font(.system(size: 14, weight: .medium))
+                                .foregroundStyle(EchoTheme.accent)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(.horizontal, 14)
+                                .frame(height: 46)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .background(EchoTheme.surfaceRaised.opacity(0.55))
+            }
+            .background(EchoTheme.surface, in: .rect(cornerRadius: 18, style: .continuous))
+            .overlay { RoundedRectangle(cornerRadius: 18).stroke(EchoTheme.border, lineWidth: 1) }
+            .clipShape(.rect(cornerRadius: 18, style: .continuous))
+
+            VStack(spacing: 0) {
+                HStack {
+                    Text("Weekly review")
+                        .font(.system(size: 15, weight: .medium))
+                    Spacer()
+                    onOffButton(
+                        isOn: store.state.weeklyReviewPreferences.enabled,
+                        action: {
+                            store.setWeeklyReviewEnabled(!store.state.weeklyReviewPreferences.enabled)
+                        }
+                    )
+                }
+                .padding(14)
+
+                if store.state.weeklyReviewPreferences.enabled {
+                    Divider().overlay(EchoTheme.border)
+                    HStack(spacing: 12) {
+                        Menu {
+                            ForEach(Array(ReflectionScheduler.weekdayLabels.enumerated()), id: \.offset) {
+                                index, label in
+                                Button(label) { store.setWeeklyReviewWeekday(index + 1) }
+                            }
+                        } label: {
+                            HStack(spacing: 6) {
+                                Text(weeklyReviewWeekday)
+                                Image(systemName: "chevron.down")
+                                    .font(.system(size: 10, weight: .semibold))
+                            }
+                            .font(.system(size: 14, weight: .medium))
+                            .foregroundStyle(EchoTheme.textPrimary)
+                            .padding(.horizontal, 12)
+                            .frame(height: 38)
+                            .background(EchoTheme.surfaceRaised, in: .capsule)
+                            .overlay { Capsule().stroke(EchoTheme.border, lineWidth: 1) }
+                        }
+
+                        Spacer()
+
+                        DatePicker(
+                            "Weekly review time",
+                            selection: weeklyReviewTimeBinding,
+                            displayedComponents: .hourAndMinute
+                        )
+                        .labelsHidden()
+                        .datePickerStyle(.compact)
+                        .tint(EchoTheme.accent)
+                    }
+                    .padding(14)
+                    .background(EchoTheme.surfaceRaised.opacity(0.55))
+                }
+            }
+            .background(EchoTheme.surface, in: .rect(cornerRadius: 18, style: .continuous))
+            .overlay { RoundedRectangle(cornerRadius: 18).stroke(EchoTheme.border, lineWidth: 1) }
+            .clipShape(.rect(cornerRadius: 18, style: .continuous))
+        }
+    }
+
     private var standingMessagesSection: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
@@ -302,6 +421,44 @@ struct EchoQueueView: View {
             return date.formatted(.dateTime.month(.abbreviated).day())
         }
         return date.formatted(.dateTime.month(.abbreviated).day().year())
+    }
+
+    private var weeklyReviewWeekday: String {
+        let index = store.state.weeklyReviewPreferences.weekday - 1
+        guard ReflectionScheduler.weekdayLabels.indices.contains(index) else { return "Sunday" }
+        return ReflectionScheduler.weekdayLabels[index]
+    }
+
+    private var weeklyReviewTimeBinding: Binding<Date> {
+        Binding(
+            get: {
+                date(
+                    hour: store.state.weeklyReviewPreferences.hour,
+                    minute: store.state.weeklyReviewPreferences.minute
+                )
+            },
+            set: { store.setWeeklyReviewTime($0) }
+        )
+    }
+
+    private func dailyTimeBinding(at index: Int) -> Binding<Date> {
+        Binding(
+            get: {
+                guard store.state.dailyCheckInPreferences.times.indices.contains(index) else { return .now }
+                let reminder = store.state.dailyCheckInPreferences.times[index]
+                return date(hour: reminder.hour, minute: reminder.minute)
+            },
+            set: { store.updateDailyCheckInTime(at: index, date: $0) }
+        )
+    }
+
+    private func date(hour: Int, minute: Int) -> Date {
+        Calendar.current.date(
+            bySettingHour: hour,
+            minute: minute,
+            second: 0,
+            of: .now
+        ) ?? .now
     }
 
     private func openWidgetEntry(_ entry: WidgetEntryPayload) {

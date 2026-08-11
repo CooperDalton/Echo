@@ -115,3 +115,100 @@ enum EchoScheduler {
     }
 }
 
+enum ReflectionScheduler {
+    static let weekdayLabels = [
+        "Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday",
+    ]
+
+    static func latestWeeklyReviewOccurrence(
+        preferences: WeeklyReviewPreferences,
+        now: Date = .now,
+        calendar: Calendar = .current
+    ) -> Date? {
+        guard
+            preferences.enabled,
+            (1...7).contains(preferences.weekday),
+            (0...23).contains(preferences.hour),
+            (0...59).contains(preferences.minute),
+            let startsAtValue = preferences.startsAt,
+            let startsAt = ISO8601DateFormatter.echo.date(from: startsAtValue),
+            now >= startsAt
+        else { return nil }
+
+        var occurrence = calendar.dateComponents([.year, .month, .day], from: now)
+        occurrence.hour = preferences.hour
+        occurrence.minute = preferences.minute
+        occurrence.second = 0
+        guard var date = calendar.date(from: occurrence) else { return nil }
+
+        let currentWeekday = calendar.component(.weekday, from: date)
+        date = calendar.date(
+            byAdding: .day,
+            value: -((currentWeekday - preferences.weekday + 7) % 7),
+            to: date
+        ) ?? date
+        if date > now {
+            date = calendar.date(byAdding: .day, value: -7, to: date) ?? date
+        }
+        return date >= startsAt ? date : nil
+    }
+
+    static func pendingWeeklyReviewOccurrence(
+        preferences: WeeklyReviewPreferences,
+        reviews: [WeeklyReview],
+        now: Date = .now,
+        calendar: Calendar = .current
+    ) -> Date? {
+        guard let occurrence = latestWeeklyReviewOccurrence(
+            preferences: preferences,
+            now: now,
+            calendar: calendar
+        ) else { return nil }
+
+        let alreadyCompleted = reviews.contains { review in
+            guard let scheduledFor = ISO8601DateFormatter.echo.date(from: review.scheduledFor) else { return false }
+            return abs(scheduledFor.timeIntervalSince(occurrence)) < 1
+        }
+        return alreadyCompleted ? nil : occurrence
+    }
+
+    static func previousWeeklyReview(
+        reviews: [WeeklyReview],
+        before occurrence: Date
+    ) -> WeeklyReview? {
+        reviews
+            .filter { review in
+                guard let scheduledFor = ISO8601DateFormatter.echo.date(from: review.scheduledFor) else { return false }
+                return scheduledFor < occurrence
+            }
+            .max { $0.scheduledFor < $1.scheduledFor }
+    }
+
+    static func pendingDailyCheckIn(
+        preferences: DailyCheckInPreferences,
+        checkIns: [CheckIn],
+        now: Date = .now,
+        calendar: Calendar = .current
+    ) -> Date? {
+        guard preferences.enabled else { return nil }
+        let dueTimes = preferences.times.compactMap { reminder -> Date? in
+            guard (0...23).contains(reminder.hour), (0...59).contains(reminder.minute) else { return nil }
+            var components = calendar.dateComponents([.year, .month, .day], from: now)
+            components.hour = reminder.hour
+            components.minute = reminder.minute
+            components.second = 0
+            guard let occurrence = calendar.date(from: components), occurrence <= now else { return nil }
+            return occurrence
+        }
+
+        return dueTimes.sorted(by: >).first { occurrence in
+            !checkIns.contains { checkIn in
+                guard
+                    checkIn.kind == .evening,
+                    let createdAt = ISO8601DateFormatter.echo.date(from: checkIn.createdAt)
+                else { return false }
+                return createdAt >= occurrence && calendar.isDate(createdAt, inSameDayAs: occurrence)
+            }
+        }
+    }
+}

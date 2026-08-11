@@ -38,6 +38,7 @@ export default async function handler(
         standingMessages: parsed.snapshot.standingMessages,
         weeklyReviews: parsed.snapshot.weeklyReviews,
         weeklyReviewPreferences: parsed.snapshot.weeklyReviewPreferences,
+        dailyCheckInPreferences: parsed.snapshot.dailyCheckInPreferences,
       },
       parsed.deviceId
     );
@@ -50,6 +51,7 @@ export default async function handler(
       standingMessages: merged.state.standingMessages,
       weeklyReviews: merged.state.weeklyReviews,
       weeklyReviewPreferences: merged.state.weeklyReviewPreferences,
+      dailyCheckInPreferences: merged.state.dailyCheckInPreferences,
       syncedAt: new Date().toISOString(),
       summary: merged.summary,
     });

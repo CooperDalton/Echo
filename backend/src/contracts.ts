@@ -95,6 +95,17 @@ export type WeeklyReviewPreferences = {
   updatedAt: string | null;
 };
 
+export type ReminderTime = {
+  hour: number;
+  minute: number;
+};
+
+export type DailyCheckInPreferences = {
+  enabled: boolean;
+  times: ReminderTime[];
+  updatedAt: string | null;
+};
+
 export type NotesState = {
   recent: Note[];
   reviewed: Note[];
@@ -104,4 +115,5 @@ export type NotesState = {
   standingMessages: StandingMessage[];
   weeklyReviews: WeeklyReview[];
   weeklyReviewPreferences: WeeklyReviewPreferences;
+  dailyCheckInPreferences: DailyCheckInPreferences;
 };

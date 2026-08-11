@@ -13,9 +13,10 @@ final class EchoStore {
     var libraryPath: [AppRoute] = []
     var echoPath: [AppRoute] = []
     var savePulse = 0
-    var checkInFlowRequest = 0
+    var isCheckInFlowPresented = false
     var lastSavedTitle: String?
     var persistenceError: String?
+    var weeklyReviewPresentation: WeeklyReviewPresentation?
 
     private let persistence: EchoPersistence
     @ObservationIgnored private var isDirty = false
@@ -225,6 +226,152 @@ final class EchoStore {
         persist(markDirty: false)
     }
 
+    func addDailyCheckInTime() {
+        guard state.dailyCheckInPreferences.times.count < 5 else { return }
+        let used = Set(state.dailyCheckInPreferences.times)
+        let base = state.dailyCheckInPreferences.times.sorted {
+            ($0.hour, $0.minute) < ($1.hour, $1.minute)
+        }.last ?? .evening
+        let candidates = (1...24).map { offset in
+            let totalMinutes = (base.hour * 60 + base.minute + offset * 60) % (24 * 60)
+            return ReminderTime(hour: totalMinutes / 60, minute: totalMinutes % 60)
+        }
+        guard let next = candidates.first(where: { !used.contains($0) }) else { return }
+        state.dailyCheckInPreferences.times.append(next)
+        state.dailyCheckInPreferences.times.sort { ($0.hour, $0.minute) < ($1.hour, $1.minute) }
+        state.dailyCheckInPreferences.enabled = true
+        state.dailyCheckInPreferences.updatedAt = ISO8601DateFormatter.echo.string(from: .now)
+        saveReminderPreferences()
+    }
+
+    func updateDailyCheckInTime(at index: Int, date: Date) {
+        guard state.dailyCheckInPreferences.times.indices.contains(index) else { return }
+        let components = Calendar.current.dateComponents([.hour, .minute], from: date)
+        let updated = ReminderTime(hour: components.hour ?? 20, minute: components.minute ?? 0)
+        state.dailyCheckInPreferences.times[index] = updated
+        state.dailyCheckInPreferences.times = Array(Set(state.dailyCheckInPreferences.times))
+            .sorted { ($0.hour, $0.minute) < ($1.hour, $1.minute) }
+        state.dailyCheckInPreferences.enabled = !state.dailyCheckInPreferences.times.isEmpty
+        state.dailyCheckInPreferences.updatedAt = ISO8601DateFormatter.echo.string(from: .now)
+        saveReminderPreferences()
+    }
+
+    func deleteDailyCheckInTime(at index: Int) {
+        guard state.dailyCheckInPreferences.times.indices.contains(index) else { return }
+        state.dailyCheckInPreferences.times.remove(at: index)
+        state.dailyCheckInPreferences.enabled = !state.dailyCheckInPreferences.times.isEmpty
+        state.dailyCheckInPreferences.updatedAt = ISO8601DateFormatter.echo.string(from: .now)
+        saveReminderPreferences()
+    }
+
+    func setWeeklyReviewEnabled(_ enabled: Bool) {
+        let now = ISO8601DateFormatter.echo.string(from: .now)
+        state.weeklyReviewPreferences.enabled = enabled
+        if enabled, state.weeklyReviewPreferences.startsAt == nil {
+            state.weeklyReviewPreferences.startsAt = now
+        }
+        state.weeklyReviewPreferences.updatedAt = now
+        saveReminderPreferences()
+    }
+
+    func setWeeklyReviewWeekday(_ weekday: Int) {
+        state.weeklyReviewPreferences.weekday = min(7, max(1, weekday))
+        state.weeklyReviewPreferences.updatedAt = ISO8601DateFormatter.echo.string(from: .now)
+        saveReminderPreferences()
+    }
+
+    func setWeeklyReviewTime(_ date: Date) {
+        let components = Calendar.current.dateComponents([.hour, .minute], from: date)
+        state.weeklyReviewPreferences.hour = components.hour ?? 18
+        state.weeklyReviewPreferences.minute = components.minute ?? 0
+        state.weeklyReviewPreferences.updatedAt = ISO8601DateFormatter.echo.string(from: .now)
+        saveReminderPreferences()
+    }
+
+    func refreshReminderSchedule(requestPermission: Bool = false) {
+        let daily = state.dailyCheckInPreferences
+        let weekly = state.weeklyReviewPreferences
+        Task {
+            await NotificationService.applyReminderSchedule(
+                daily: daily,
+                weekly: weekly,
+                requestPermissionIfNeeded: requestPermission
+            )
+        }
+    }
+
+    func presentDueReflectionIfNeeded(now: Date = .now) {
+        guard !isCheckInFlowPresented, weeklyReviewPresentation == nil else { return }
+
+        if let occurrence = ReflectionScheduler.pendingWeeklyReviewOccurrence(
+            preferences: state.weeklyReviewPreferences,
+            reviews: state.weeklyReviews,
+            now: now
+        ) {
+            weeklyReviewPresentation = WeeklyReviewPresentation(
+                scheduledFor: ISO8601DateFormatter.echo.string(from: occurrence),
+                source: "prompt"
+            )
+            return
+        }
+
+        if ReflectionScheduler.pendingDailyCheckIn(
+            preferences: state.dailyCheckInPreferences,
+            checkIns: state.checkIns,
+            now: now
+        ) != nil {
+            selectedTab = .checkIn
+            isCheckInFlowPresented = true
+        }
+    }
+
+    func presentWeeklyReview(source: String) {
+        guard !isCheckInFlowPresented else { return }
+        let occurrence = ReflectionScheduler.pendingWeeklyReviewOccurrence(
+            preferences: state.weeklyReviewPreferences,
+            reviews: state.weeklyReviews
+        ) ?? ReflectionScheduler.latestWeeklyReviewOccurrence(
+            preferences: state.weeklyReviewPreferences
+        ) ?? .now
+        weeklyReviewPresentation = WeeklyReviewPresentation(
+            scheduledFor: ISO8601DateFormatter.echo.string(from: occurrence),
+            source: source
+        )
+    }
+
+    func saveWeeklyReview(scheduledFor: String, reflection: String, nextWeekIntent: String) {
+        let reflection = reflection.trimmingCharacters(in: .whitespacesAndNewlines)
+        let nextWeekIntent = nextWeekIntent.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !reflection.isEmpty, !nextWeekIntent.isEmpty else { return }
+        let now = ISO8601DateFormatter.echo.string(from: .now)
+        if let index = state.weeklyReviews.firstIndex(where: { $0.scheduledFor == scheduledFor }) {
+            state.weeklyReviews[index].reflection = reflection
+            state.weeklyReviews[index].nextWeekIntent = nextWeekIntent
+            state.weeklyReviews[index].updatedAt = now
+        } else {
+            state.weeklyReviews.append(
+                WeeklyReview(
+                    id: "weekly-review-\(Int(Date.now.timeIntervalSince1970 * 1_000))-\(UUID().uuidString.prefix(6).lowercased())",
+                    scheduledFor: scheduledFor,
+                    completedAt: now,
+                    updatedAt: now,
+                    reflection: reflection,
+                    nextWeekIntent: nextWeekIntent
+                )
+            )
+        }
+        state.weeklyReviews.sort { $0.scheduledFor > $1.scheduledFor }
+        weeklyReviewPresentation = nil
+        persist(markDirty: true)
+        if ReflectionScheduler.pendingDailyCheckIn(
+            preferences: state.dailyCheckInPreferences,
+            checkIns: state.checkIns
+        ) != nil {
+            selectedTab = .checkIn
+            isCheckInFlowPresented = true
+        }
+    }
+
     func saveConfig(_ updated: EchoSyncConfig) {
         config = updated
         do {
@@ -247,6 +394,7 @@ final class EchoStore {
             syncStatus.isSyncing = false
             syncStatus.lastSyncedAt = response.syncedAt ?? ISO8601DateFormatter.echo.string(from: .now)
             persist(markDirty: false)
+            refreshReminderSchedule()
         } catch {
             syncStatus.isSyncing = false
             syncStatus.lastError = error.localizedDescription
@@ -331,6 +479,11 @@ final class EchoStore {
             isDirty = true
             scheduleAutoSync()
         }
+    }
+
+    private func saveReminderPreferences() {
+        persist(markDirty: true)
+        refreshReminderSchedule(requestPermission: true)
     }
 
     private func classifyIfPossible(noteID: String) {

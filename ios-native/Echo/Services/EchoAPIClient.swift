@@ -7,6 +7,9 @@ struct SyncRequestBody: Codable, Sendable {
         let deletedNotes: [DeletedNote]
         let bucketPreferences: BucketPreferences
         let standingMessages: [StandingMessage]
+        let weeklyReviews: [WeeklyReview]
+        let weeklyReviewPreferences: WeeklyReviewPreferences
+        let dailyCheckInPreferences: DailyCheckInPreferences
     }
 
     let deviceId: String
@@ -26,6 +29,9 @@ struct SyncResponseBody: Codable, Sendable {
     var deletedNotes: [DeletedNote]?
     var bucketPreferences: BucketPreferences?
     var standingMessages: [StandingMessage]?
+    var weeklyReviews: [WeeklyReview]?
+    var weeklyReviewPreferences: WeeklyReviewPreferences?
+    var dailyCheckInPreferences: DailyCheckInPreferences?
     var syncedAt: String?
     var summary: Summary?
 }
@@ -65,7 +71,10 @@ struct EchoAPIClient: Sendable {
                 checkIns: state.checkIns,
                 deletedNotes: state.deletedNotes,
                 bucketPreferences: state.bucketPreferences,
-                standingMessages: state.standingMessages
+                standingMessages: state.standingMessages,
+                weeklyReviews: state.weeklyReviews,
+                weeklyReviewPreferences: state.weeklyReviewPreferences,
+                dailyCheckInPreferences: state.dailyCheckInPreferences
             )
         )
         return try await post(path: "/api/mobile/sync", body: payload)
@@ -119,4 +128,3 @@ struct EchoAPIClient: Sendable {
         return try JSONDecoder().decode(Response.self, from: data)
     }
 }
-

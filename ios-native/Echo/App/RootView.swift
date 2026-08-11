@@ -35,12 +35,19 @@ struct RootView: View {
         .toolbarBackground(.visible, for: .tabBar)
         .background(EchoTheme.canvas)
         .onOpenURL { store.handle(url: $0) }
-        .task { await store.syncOnLaunch() }
+        .task {
+            await store.syncOnLaunch()
+            store.refreshReminderSchedule()
+            try? await Task.sleep(for: .milliseconds(250))
+            store.presentDueReflectionIfNeeded()
+        }
         .onChange(of: scenePhase) { _, nextPhase in
             Task {
                 switch nextPhase {
                 case .active:
                     await store.syncOnForeground()
+                    store.refreshReminderSchedule()
+                    store.presentDueReflectionIfNeeded()
                 case .inactive, .background:
                     await store.syncBeforeBackground()
                 @unknown default:
@@ -52,8 +59,18 @@ struct RootView: View {
             guard let route = notification.object as? String else { return }
             if route == "/checkin" || route == "/checkin-flow" {
                 store.selectedTab = .checkIn
-                if route == "/checkin-flow" { store.checkInFlowRequest += 1 }
+                if route == "/checkin-flow", !store.isCheckInFlowPresented {
+                    store.isCheckInFlowPresented = true
+                }
+            } else if route == "/weekly-review" {
+                store.presentWeeklyReview(source: "notification")
             }
+        }
+        .fullScreenCover(isPresented: $store.isCheckInFlowPresented) {
+            CheckInFlowView()
+        }
+        .fullScreenCover(item: $store.weeklyReviewPresentation) { presentation in
+            WeeklyReviewView(presentation: presentation)
         }
     }
 }

@@ -5,6 +5,7 @@ import {
   type BucketDraft,
   type BucketPreferences,
   type CheckIn,
+  type DailyCheckInPreferences,
   type DeletedNote,
   type Note,
   type StandingMessage,
@@ -83,6 +84,15 @@ export const weeklyReviewPreferencesSchema = z.object({
   updatedAt: z.string().datetime().nullable(),
 }) satisfies z.ZodType<WeeklyReviewPreferences>;
 
+export const dailyCheckInPreferencesSchema = z.object({
+  enabled: z.boolean(),
+  times: z.array(z.object({
+    hour: z.number().int().min(0).max(23),
+    minute: z.number().int().min(0).max(59),
+  })).max(5),
+  updatedAt: z.string().datetime().nullable(),
+}) satisfies z.ZodType<DailyCheckInPreferences>;
+
 export const bucketDraftSchema = z.object({
   name: z.string().min(1),
   description: z.string(),
@@ -134,6 +144,11 @@ export const syncRequestSchema = z.object({
       hour: 18,
       minute: 0,
       startsAt: null,
+      updatedAt: null,
+    }),
+    dailyCheckInPreferences: dailyCheckInPreferencesSchema.default({
+      enabled: true,
+      times: [{ hour: 20, minute: 0 }],
       updatedAt: null,
     }),
   }),

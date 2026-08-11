@@ -8,9 +8,7 @@ private let emotionEmoji = [
 
 struct CheckInView: View {
     @Environment(EchoStore.self) private var store
-    @State private var newCheckIn = false
     @State private var selectedCheckIn: CheckInRoute?
-    @State private var handledFlowRequest = 0
 
     var body: some View {
         VStack(spacing: 20) {
@@ -18,7 +16,7 @@ struct CheckInView: View {
                 Text("Recent Check-ins")
                     .font(.system(size: 18, weight: .semibold))
                 Spacer()
-                Button("+") { newCheckIn = true }
+                Button("+") { store.isCheckInFlowPresented = true }
                     .font(.system(size: 28))
                     .foregroundStyle(EchoTheme.canvas)
                     .frame(width: 44, height: 44)
@@ -58,26 +56,11 @@ struct CheckInView: View {
         .padding(.top, 12)
         .padding(.bottom, 24)
         .background(EchoTheme.canvas.ignoresSafeArea())
-        .fullScreenCover(isPresented: $newCheckIn) {
-            CheckInFlowView()
-        }
         .fullScreenCover(item: $selectedCheckIn) { route in
             CheckInDetailModal(checkInID: route.id)
                 .presentationBackground(.clear)
         }
-        .task {
-            guard (try? await NotificationService.requestPermission()) == true else { return }
-            try? await NotificationService.scheduleEveningCheckIn()
-        }
-        .onAppear { openRequestedFlowIfNeeded() }
-        .onChange(of: store.checkInFlowRequest) { _, _ in openRequestedFlowIfNeeded() }
         .sensoryFeedback(.success, trigger: store.savePulse)
-    }
-
-    private func openRequestedFlowIfNeeded() {
-        guard store.checkInFlowRequest > handledFlowRequest else { return }
-        handledFlowRequest = store.checkInFlowRequest
-        newCheckIn = true
     }
 }
 
@@ -260,7 +243,7 @@ private struct CheckInDetailModal: View {
     }
 }
 
-private struct CheckInFlowView: View {
+struct CheckInFlowView: View {
     @Environment(EchoStore.self) private var store
     @Environment(\.dismiss) private var dismiss
     @State private var stepIndex = 0

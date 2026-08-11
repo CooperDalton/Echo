@@ -22,6 +22,12 @@ enum SyncMerger {
             id: \.id,
             timestamp: \.createdAt
         )
+        let weeklyReviews = mergeByID(
+            local.weeklyReviews,
+            response.weeklyReviews ?? [],
+            id: \.id,
+            timestamp: \.updatedAt
+        )
 
         return NotesState(
             recent: notes.filter { $0.echo.state != .reviewed }.sorted { $0.createdAt > $1.createdAt },
@@ -32,8 +38,37 @@ enum SyncMerger {
             standingMessages: local.standingMessages.isEmpty
                 ? (response.standingMessages ?? [])
                 : local.standingMessages,
-            widgetPreferences: local.widgetPreferences
+            widgetPreferences: local.widgetPreferences,
+            weeklyReviews: weeklyReviews.sorted { $0.scheduledFor > $1.scheduledFor },
+            weeklyReviewPreferences: newerPreferences(
+                local.weeklyReviewPreferences,
+                response.weeklyReviewPreferences
+            ),
+            dailyCheckInPreferences: newerPreferences(
+                local.dailyCheckInPreferences,
+                response.dailyCheckInPreferences
+            )
         )
+    }
+
+    private static func newerPreferences(
+        _ local: WeeklyReviewPreferences,
+        _ remote: WeeklyReviewPreferences?
+    ) -> WeeklyReviewPreferences {
+        guard let remote else { return local }
+        guard let localUpdatedAt = local.updatedAt else { return remote }
+        guard let remoteUpdatedAt = remote.updatedAt else { return local }
+        return localUpdatedAt >= remoteUpdatedAt ? local : remote
+    }
+
+    private static func newerPreferences(
+        _ local: DailyCheckInPreferences,
+        _ remote: DailyCheckInPreferences?
+    ) -> DailyCheckInPreferences {
+        guard let remote else { return local.normalized }
+        guard let localUpdatedAt = local.updatedAt else { return remote.normalized }
+        guard let remoteUpdatedAt = remote.updatedAt else { return local.normalized }
+        return (localUpdatedAt >= remoteUpdatedAt ? local : remote).normalized
     }
 
     private static func mergeByID<Value>(

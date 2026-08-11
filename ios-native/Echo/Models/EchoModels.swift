@@ -68,6 +68,60 @@ struct WidgetPreferences: Codable, Hashable, Sendable {
     static let `default` = WidgetPreferences(enabled: true, includeStandingMessages: true)
 }
 
+struct ReminderTime: Codable, Hashable, Identifiable, Sendable {
+    var hour: Int
+    var minute: Int
+
+    var id: String { String(format: "%02d:%02d", hour, minute) }
+
+    static let evening = ReminderTime(hour: 20, minute: 0)
+}
+
+struct DailyCheckInPreferences: Codable, Hashable, Sendable {
+    var enabled: Bool
+    var times: [ReminderTime]
+    var updatedAt: String?
+
+    static let `default` = DailyCheckInPreferences(
+        enabled: true,
+        times: [.evening],
+        updatedAt: nil
+    )
+
+    var normalized: DailyCheckInPreferences {
+        var result = self
+        result.enabled = !result.times.isEmpty
+        return result
+    }
+}
+
+struct WeeklyReview: Codable, Hashable, Identifiable, Sendable {
+    var id: String
+    var scheduledFor: String
+    var completedAt: String
+    var updatedAt: String
+    var reflection: String
+    var nextWeekIntent: String
+}
+
+struct WeeklyReviewPreferences: Codable, Hashable, Sendable {
+    var enabled: Bool
+    var weekday: Int
+    var hour: Int
+    var minute: Int
+    var startsAt: String?
+    var updatedAt: String?
+
+    static let `default` = WeeklyReviewPreferences(
+        enabled: false,
+        weekday: 1,
+        hour: 18,
+        minute: 0,
+        startsAt: nil,
+        updatedAt: nil
+    )
+}
+
 struct DeletedNote: Codable, Hashable, Identifiable, Sendable {
     var id: String
     var filePath: String?
@@ -103,6 +157,68 @@ struct NotesState: Codable, Hashable, Sendable {
     var bucketPreferences: BucketPreferences
     var standingMessages: [StandingMessage]
     var widgetPreferences: WidgetPreferences
+    var weeklyReviews: [WeeklyReview]
+    var weeklyReviewPreferences: WeeklyReviewPreferences
+    var dailyCheckInPreferences: DailyCheckInPreferences
+
+    init(
+        recent: [EchoNote],
+        reviewed: [EchoNote],
+        checkIns: [CheckIn],
+        deletedNotes: [DeletedNote],
+        bucketPreferences: BucketPreferences,
+        standingMessages: [StandingMessage],
+        widgetPreferences: WidgetPreferences,
+        weeklyReviews: [WeeklyReview],
+        weeklyReviewPreferences: WeeklyReviewPreferences,
+        dailyCheckInPreferences: DailyCheckInPreferences
+    ) {
+        self.recent = recent
+        self.reviewed = reviewed
+        self.checkIns = checkIns
+        self.deletedNotes = deletedNotes
+        self.bucketPreferences = bucketPreferences
+        self.standingMessages = standingMessages
+        self.widgetPreferences = widgetPreferences
+        self.weeklyReviews = weeklyReviews
+        self.weeklyReviewPreferences = weeklyReviewPreferences
+        self.dailyCheckInPreferences = dailyCheckInPreferences
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case recent
+        case reviewed
+        case checkIns
+        case deletedNotes
+        case bucketPreferences
+        case standingMessages
+        case widgetPreferences
+        case weeklyReviews
+        case weeklyReviewPreferences
+        case dailyCheckInPreferences
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        recent = try container.decodeIfPresent([EchoNote].self, forKey: .recent) ?? []
+        reviewed = try container.decodeIfPresent([EchoNote].self, forKey: .reviewed) ?? []
+        checkIns = try container.decodeIfPresent([CheckIn].self, forKey: .checkIns) ?? []
+        deletedNotes = try container.decodeIfPresent([DeletedNote].self, forKey: .deletedNotes) ?? []
+        bucketPreferences = try container.decodeIfPresent(BucketPreferences.self, forKey: .bucketPreferences)
+            ?? BucketPreferences(customs: [])
+        standingMessages = try container.decodeIfPresent([StandingMessage].self, forKey: .standingMessages) ?? []
+        widgetPreferences = try container.decodeIfPresent(WidgetPreferences.self, forKey: .widgetPreferences)
+            ?? .default
+        weeklyReviews = try container.decodeIfPresent([WeeklyReview].self, forKey: .weeklyReviews) ?? []
+        weeklyReviewPreferences = try container.decodeIfPresent(
+            WeeklyReviewPreferences.self,
+            forKey: .weeklyReviewPreferences
+        ) ?? .default
+        dailyCheckInPreferences = (try container.decodeIfPresent(
+            DailyCheckInPreferences.self,
+            forKey: .dailyCheckInPreferences
+        ) ?? .default).normalized
+    }
 
     static let empty = NotesState(
         recent: [],
@@ -111,7 +227,10 @@ struct NotesState: Codable, Hashable, Sendable {
         deletedNotes: [],
         bucketPreferences: BucketPreferences(customs: []),
         standingMessages: [],
-        widgetPreferences: .default
+        widgetPreferences: .default,
+        weeklyReviews: [],
+        weeklyReviewPreferences: .default,
+        dailyCheckInPreferences: .default
     )
 
     var allNotes: [EchoNote] {
@@ -159,6 +278,13 @@ enum AppRoute: Hashable {
     case note(String)
     case standing(String)
     case settings
+}
+
+struct WeeklyReviewPresentation: Identifiable, Hashable, Sendable {
+    var scheduledFor: String
+    var source: String
+
+    var id: String { "\(scheduledFor)-\(source)" }
 }
 
 struct SyncStatus: Hashable, Sendable {
