@@ -11,11 +11,48 @@ struct WidgetEntryPayload: Codable, Hashable, Identifiable, Sendable {
     let kind: Kind
     let text: String
     let targetURL: String?
+    var visibleFrom: String? = nil
+    var visibleUntil: String? = nil
+
+    func isVisible(at date: Date) -> Bool {
+        if let visibleFrom, let start = Self.parseDate(visibleFrom), date < start {
+            return false
+        }
+        if let visibleUntil, let end = Self.parseDate(visibleUntil), date >= end {
+            return false
+        }
+        return true
+    }
+
+    func nextVisibilityBoundary(after date: Date) -> Date? {
+        [visibleFrom, visibleUntil]
+            .compactMap { $0.flatMap(Self.parseDate) }
+            .filter { $0 > date }
+            .min()
+    }
+
+    private static func parseDate(_ raw: String) -> Date? {
+        let fractional = ISO8601DateFormatter()
+        fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if let date = fractional.date(from: raw) { return date }
+
+        let standard = ISO8601DateFormatter()
+        standard.formatOptions = [.withInternetDateTime]
+        return standard.date(from: raw)
+    }
 }
 
 struct WidgetSnapshot: Codable, Sendable {
     let entries: [WidgetEntryPayload]
     let updatedAt: String
+
+    func visibleEntries(at date: Date) -> [WidgetEntryPayload] {
+        entries.filter { $0.isVisible(at: date) }
+    }
+
+    func nextVisibilityBoundary(after date: Date) -> Date? {
+        entries.compactMap { $0.nextVisibilityBoundary(after: date) }.min()
+    }
 }
 
 enum EchoSharedContainer {
@@ -28,4 +65,3 @@ enum EchoSharedContainer {
             .appendingPathComponent(widgetSnapshotFile)
     }
 }
-

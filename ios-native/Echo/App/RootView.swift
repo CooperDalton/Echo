@@ -36,6 +36,7 @@ struct RootView: View {
         .background(EchoTheme.canvas)
         .onOpenURL { store.handle(url: $0) }
         .task {
+            store.refreshWidget()
             await store.syncOnLaunch()
             store.refreshReminderSchedule()
             try? await Task.sleep(for: .milliseconds(250))
@@ -45,6 +46,7 @@ struct RootView: View {
             Task {
                 switch nextPhase {
                 case .active:
+                    store.refreshWidget()
                     await store.syncOnForeground()
                     store.refreshReminderSchedule()
                     store.presentDueReflectionIfNeeded()

@@ -218,6 +218,38 @@ struct EchoModelsTests {
         #expect(entry?.targetURL == "echo://note/note-widget")
     }
 
+    @Test func reviewedEchoRemainsVisibleForTheDayItSurfaced() throws {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = try #require(TimeZone(identifier: "America/Los_Angeles"))
+        let dueDate = try #require(calendar.date(from: DateComponents(
+            year: 2026, month: 8, day: 11, hour: 9
+        )))
+        let reviewedAt = try #require(calendar.date(from: DateComponents(
+            year: 2026, month: 8, day: 11, hour: 9, minute: 29
+        )))
+        let laterToday = try #require(calendar.date(from: DateComponents(
+            year: 2026, month: 8, day: 11, hour: 18
+        )))
+        let tomorrow = try #require(calendar.date(from: DateComponents(
+            year: 2026, month: 8, day: 12, hour: 9
+        )))
+
+        var note = ModelFactories.note(
+            body: "Keep me visible today",
+            echoEnabled: true,
+            existingNotes: [],
+            now: dueDate,
+            id: "note-reviewed-today"
+        )
+        note.echo.nextDueAt = ISO8601DateFormatter.echo.string(from: dueDate)
+        note.echo = EchoScheduler.review(note.echo, at: reviewedAt)
+        var state = NotesState.empty
+        state.reviewed = [note]
+
+        #expect(WidgetBridge.entries(from: state, now: laterToday).first?.text == "Keep me visible today")
+        #expect(WidgetBridge.entries(from: state, now: tomorrow).isEmpty)
+    }
+
     @Test @MainActor func categoryEditsRenameExistingNoteAssignments() throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: directory) }

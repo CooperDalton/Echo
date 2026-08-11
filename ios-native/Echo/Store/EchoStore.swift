@@ -226,6 +226,10 @@ final class EchoStore {
         persist(markDirty: false)
     }
 
+    func refreshWidget() {
+        WidgetBridge.update(from: state)
+    }
+
     func addDailyCheckInTime() {
         guard state.dailyCheckInPreferences.times.count < 5 else { return }
         let used = Set(state.dailyCheckInPreferences.times)

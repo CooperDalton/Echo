@@ -3,38 +3,78 @@ import WidgetKit
 
 enum WidgetBridge {
     static func update(from state: NotesState, now: Date = .now) {
-        guard let url = EchoSharedContainer.widgetSnapshotURL() else { return }
+        guard let url = EchoSharedContainer.widgetSnapshotURL() else {
+            print("[WidgetBridge] App Group container is unavailable.")
+            return
+        }
         let snapshot = WidgetSnapshot(
-            entries: entries(from: state, now: now),
+            entries: snapshotEntries(from: state, now: now),
             updatedAt: ISO8601DateFormatter.echo.string(from: now)
         )
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
-        guard let data = try? encoder.encode(snapshot) else { return }
-        try? data.write(to: url, options: .atomic)
+        guard let data = try? encoder.encode(snapshot) else {
+            print("[WidgetBridge] Snapshot encoding failed.")
+            return
+        }
+        do {
+            try data.write(to: url, options: .atomic)
+        } catch {
+            print("[WidgetBridge] Snapshot write failed: \(error.localizedDescription)")
+            return
+        }
         WidgetCenter.shared.reloadTimelines(ofKind: "EchoWidget")
     }
 
     static func entries(from state: NotesState, now: Date = .now) -> [WidgetEntryPayload] {
+        Array(snapshotEntries(from: state, now: now).filter { $0.isVisible(at: now) }.prefix(3))
+    }
+
+    private static func snapshotEntries(from state: NotesState, now: Date) -> [WidgetEntryPayload] {
         guard state.widgetPreferences.enabled else {
             return [WidgetEntryPayload(id: "paused", kind: .empty, text: "Echo widget is paused.", targetURL: nil)]
         }
 
-        let due = state.allNotes
-            .filter { EchoScheduler.isDue($0.echo, now: now) }
-            .sorted { $0.echo.nextDueAt < $1.echo.nextDueAt }
-            .prefix(3)
-            .map {
-                WidgetEntryPayload(
-                    id: "echo-\($0.id)",
+        let calendar = Calendar.current
+        let today = calendar.startOfDay(for: now)
+        let tomorrow = calendar.date(byAdding: .day, value: 1, to: today) ?? now.addingTimeInterval(86_400)
+        let todayStart = ISO8601DateFormatter.echo.string(from: today)
+        let tomorrowStart = ISO8601DateFormatter.echo.string(from: tomorrow)
+
+        var echoes: [WidgetEntryPayload] = []
+        for note in state.allNotes {
+            let targetURL = "echo://note/\(note.id.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? note.id)"
+            let text = ModelFactories.compactWidgetText(note.widgetText ?? note.body)
+
+            if
+                let lastReviewedAt = note.echo.lastReviewedAt,
+                let reviewedAt = ISO8601DateFormatter.echo.date(from: lastReviewedAt),
+                calendar.isDate(reviewedAt, inSameDayAs: now)
+            {
+                echoes.append(WidgetEntryPayload(
+                    id: "echo-reviewed-today-\(note.id)",
                     kind: .echo,
-                    text: ModelFactories.compactWidgetText($0.widgetText ?? $0.body),
-                    targetURL: "echo://note/\($0.id.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? $0.id)"
-                )
+                    text: text,
+                    targetURL: targetURL,
+                    visibleFrom: todayStart,
+                    visibleUntil: tomorrowStart
+                ))
             }
 
-        guard due.count < 3, state.widgetPreferences.includeStandingMessages else { return Array(due) }
-        let standing = state.standingMessages.prefix(3 - due.count).map {
+            if note.echo.enabled {
+                echoes.append(WidgetEntryPayload(
+                    id: "echo-\(note.id)",
+                    kind: .echo,
+                    text: text,
+                    targetURL: targetURL,
+                    visibleFrom: note.echo.nextDueAt
+                ))
+            }
+        }
+        echoes.sort { ($0.visibleFrom ?? "") < ($1.visibleFrom ?? "") }
+
+        guard state.widgetPreferences.includeStandingMessages else { return echoes }
+        let standing = state.standingMessages.map {
             WidgetEntryPayload(
                 id: "standing-\($0.id)",
                 kind: .standing,
@@ -42,6 +82,6 @@ enum WidgetBridge {
                 targetURL: "echo://standing/\($0.id.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? $0.id)"
             )
         }
-        return Array(due) + standing
+        return echoes + standing
     }
 }

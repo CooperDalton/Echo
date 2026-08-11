@@ -19,8 +19,12 @@ struct EchoTimelineProvider: TimelineProvider {
     }
 
     func getTimeline(in context: Context, completion: @escaping (Timeline<EchoTimelineEntry>) -> Void) {
-        let entry = EchoTimelineEntry(date: .now, snapshot: loadSnapshot())
-        completion(Timeline(entries: [entry], policy: .after(.now.addingTimeInterval(30 * 60))))
+        let now = Date.now
+        let snapshot = loadSnapshot()
+        let entry = EchoTimelineEntry(date: now, snapshot: snapshot)
+        let fallbackRefresh = now.addingTimeInterval(30 * 60)
+        let refresh = min(snapshot.nextVisibilityBoundary(after: now) ?? fallbackRefresh, fallbackRefresh)
+        completion(Timeline(entries: [entry], policy: .after(refresh)))
     }
 
     private func loadSnapshot() -> WidgetSnapshot {
@@ -47,7 +51,7 @@ struct EchoWidgetView: View {
     private let standingAccent = Color(red: 172 / 255, green: 127 / 255, blue: 202 / 255)
 
     private var visibleEntries: [WidgetEntryPayload] {
-        Array(entry.snapshot.entries.prefix(family == .systemSmall ? 1 : 3))
+        Array(entry.snapshot.visibleEntries(at: entry.date).prefix(family == .systemSmall ? 1 : 3))
     }
 
     var body: some View {
