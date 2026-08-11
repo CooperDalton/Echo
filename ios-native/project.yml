@@ -1,0 +1,109 @@
+name: Echo
+
+options:
+  bundleIdPrefix: com.cooperdalton
+  deploymentTarget:
+    iOS: "18.0"
+  createIntermediateGroups: true
+  generateEmptyDirectories: true
+
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    IPHONEOS_DEPLOYMENT_TARGET: "18.0"
+    MARKETING_VERSION: "1.0.0"
+    CURRENT_PROJECT_VERSION: "1"
+    DEVELOPMENT_ASSET_PATHS: '"Echo/Preview Content"'
+
+targets:
+  Echo:
+    type: application
+    platform: iOS
+    sources:
+      - path: Echo
+      - path: Shared
+    resources:
+      - path: Echo/Assets.xcassets
+    info:
+      path: Echo/Info.plist
+      properties:
+        CFBundleDisplayName: Echo
+        EXPO_PUBLIC_ECHO_API_URL: $(EXPO_PUBLIC_ECHO_API_URL)
+        EXPO_PUBLIC_ECHO_API_TOKEN: $(EXPO_PUBLIC_ECHO_API_TOKEN)
+        CFBundleURLTypes:
+          - CFBundleTypeRole: Editor
+            CFBundleURLName: com.cooperdalton.echo
+            CFBundleURLSchemes:
+              - echo
+        UILaunchScreen:
+          UIColorName: LaunchBackground
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+        UISupportedInterfaceOrientations~ipad:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationPortraitUpsideDown
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+    entitlements:
+      path: Echo/Echo.entitlements
+      properties:
+        com.apple.security.application-groups:
+          - group.com.cooperdalton.echo
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.cooperdalton.echo
+        PRODUCT_NAME: Echo
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
+        CODE_SIGN_STYLE: Automatic
+    dependencies:
+      - target: EchoWidget
+
+  EchoWidget:
+    type: app-extension
+    platform: iOS
+    sources:
+      - path: EchoWidget
+      - path: Shared/WidgetModels.swift
+    info:
+      path: EchoWidget/Info.plist
+      properties:
+        CFBundleDisplayName: Echo
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.widgetkit-extension
+    entitlements:
+      path: EchoWidget/EchoWidget.entitlements
+      properties:
+        com.apple.security.application-groups:
+          - group.com.cooperdalton.echo
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.cooperdalton.echo.ExpoWidgetsTarget
+        PRODUCT_NAME: EchoWidget
+        CODE_SIGN_STYLE: Automatic
+        SKIP_INSTALL: YES
+
+  EchoTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - path: EchoTests
+    dependencies:
+      - target: Echo
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.cooperdalton.echo.tests
+        GENERATE_INFOPLIST_FILE: YES
+
+schemes:
+  Echo:
+    build:
+      targets:
+        Echo: all
+        EchoWidget: all
+        EchoTests: [test]
+    test:
+      targets:
+        - EchoTests
+    run:
+      config: Debug
