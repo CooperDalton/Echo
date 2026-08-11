@@ -1,12 +1,10 @@
 # Echo for iOS
 
-Native SwiftUI rebuild of Echo. The Expo app is the specification for screen
-copy, layout, ordering, routes, and interaction behavior; the existing backend
-and data formats remain the source of truth.
+Echo is a native SwiftUI personal notes and reflection app. The backend and
+persisted data formats remain the source of truth for sync compatibility.
 
-The native client uses a dark plum/violet visual system with warm amber actions,
-soft lavender type, and mint reserved for reviewed or positive states. That skin
-is applied without redesigning the established Expo product structure.
+The app uses a dark plum/violet visual system with warm amber actions, soft
+lavender type, and mint reserved for reviewed or positive states.
 
 ## Generate and run
 
@@ -63,15 +61,13 @@ Implemented and simulator-verified:
 - Capture a standard or Echo-enabled note with native haptics and spring animation.
 - Persist and reload the Expo-compatible JSON state.
 - Search, open, edit, review, and delete notes in the native Library.
-- Preserve the Expo Capture editor, Library sections/filtering, note routes,
-  Echo section order, check-in history/detail modal, and three-step check-in flow.
+- Provide the Capture editor, Library sections and filtering, note routes, Echo
+  section ordering, check-in history/detail editing, and three-step check-in flow.
 - Create, edit, and remove custom categories and standing messages.
 - Edit prior check-ins and control which content appears in the widget.
 - Sync automatically at launch, after returning to the foreground, shortly after
   local edits, and before backgrounding when unsynced changes remain.
 - Call the existing sync and classification endpoints.
 - Route `echo://note/:id` and `echo://standing/:id` links.
-- Schedule local check-in and sync-failure notifications.
+- Schedule local check-in, weekly-review, and sync-failure notifications.
 - Build a WidgetKit extension using the existing app group and widget bundle ID.
-
-The Expo project remains untouched and can run alongside this migration while feature parity is expanded.
