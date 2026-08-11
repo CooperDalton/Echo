@@ -48,7 +48,7 @@ struct EchoQueueView: View {
                 .toolbar(.hidden, for: .navigationBar)
                 .navigationDestination(for: AppRoute.self) { route in
                     switch route {
-                    case .note(let id): NoteDetailView(noteID: id)
+                    case .note(let id): NoteDetailView(noteID: id, mode: .echo)
                     case .standing(let id): StandingMessageEditorView(messageID: id)
                     case .settings: EmptyView()
                     }
@@ -362,14 +362,15 @@ struct EchoQueueView: View {
                                     .foregroundStyle(EchoTheme.textPrimary)
                                     .lineLimit(1)
                                     .frame(maxWidth: .infinity, alignment: .leading)
-                                VStack(alignment: .trailing) {
-                                    Text(nextEchoLabel(note.echo.nextDueAt))
-                                    Spacer(minLength: 3)
-                                    Text("\(note.echo.occurrenceCount)/\(max(note.echo.scheduledDates.count, note.echo.occurrenceCount))")
-                                }
+                                Text(
+                                    "\(nextEchoLabel(note.echo.nextDueAt))  "
+                                    + "\(note.echo.occurrenceCount)/"
+                                    + "\(max(note.echo.scheduledDates.count, note.echo.occurrenceCount))"
+                                )
                                 .font(.system(size: 12))
                                 .foregroundStyle(EchoTheme.textSecondary)
-                                .frame(width: 104, alignment: .trailing)
+                                .lineLimit(1)
+                                .fixedSize(horizontal: true, vertical: false)
                             }
                             .frame(minHeight: 44)
                             .padding(12)
