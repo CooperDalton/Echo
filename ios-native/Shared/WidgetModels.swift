@@ -47,7 +47,14 @@ struct WidgetSnapshot: Codable, Sendable {
     let updatedAt: String
 
     func visibleEntries(at date: Date) -> [WidgetEntryPayload] {
-        entries.filter { $0.isVisible(at: date) }
+        let visible = entries.filter { $0.isVisible(at: date) }
+        guard visible.isEmpty else { return visible }
+        return [WidgetEntryPayload(
+            id: "nothing-due",
+            kind: .empty,
+            text: "Nothing is due right now.",
+            targetURL: nil
+        )]
     }
 
     func nextVisibilityBoundary(after date: Date) -> Date? {

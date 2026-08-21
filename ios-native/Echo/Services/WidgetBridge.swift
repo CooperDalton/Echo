@@ -27,7 +27,11 @@ enum WidgetBridge {
     }
 
     static func entries(from state: NotesState, now: Date = .now) -> [WidgetEntryPayload] {
-        Array(snapshotEntries(from: state, now: now).filter { $0.isVisible(at: now) }.prefix(3))
+        let snapshot = WidgetSnapshot(
+            entries: snapshotEntries(from: state, now: now),
+            updatedAt: ISO8601DateFormatter.echo.string(from: now)
+        )
+        return Array(snapshot.visibleEntries(at: now).prefix(3))
     }
 
     private static func snapshotEntries(from state: NotesState, now: Date) -> [WidgetEntryPayload] {
@@ -62,12 +66,16 @@ enum WidgetBridge {
             }
 
             if note.echo.enabled {
+                let dueAt = ISO8601DateFormatter.echo.date(from: note.echo.nextDueAt)
+                let dueDay = dueAt.map { calendar.startOfDay(for: $0) }
+                let expiresAt = dueDay.flatMap { calendar.date(byAdding: .day, value: 1, to: $0) }
                 echoes.append(WidgetEntryPayload(
                     id: "echo-\(note.id)",
                     kind: .echo,
                     text: text,
                     targetURL: targetURL,
-                    visibleFrom: note.echo.nextDueAt
+                    visibleFrom: note.echo.nextDueAt,
+                    visibleUntil: expiresAt.map { ISO8601DateFormatter.echo.string(from: $0) }
                 ))
             }
         }

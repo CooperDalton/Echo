@@ -1,10 +1,28 @@
 import SwiftUI
 
+private enum WeeklyReviewField: Hashable {
+    case reflection
+    case nextWeekIntent
+}
+
+private struct WeeklyReviewEditorFramesKey: PreferenceKey {
+    static let defaultValue: [WeeklyReviewField: CGRect] = [:]
+
+    static func reduce(
+        value: inout [WeeklyReviewField: CGRect],
+        nextValue: () -> [WeeklyReviewField: CGRect]
+    ) {
+        value.merge(nextValue(), uniquingKeysWith: { _, latest in latest })
+    }
+}
+
 struct WeeklyReviewView: View {
     @Environment(EchoStore.self) private var store
     let presentation: WeeklyReviewPresentation
     @State private var reflection = ""
     @State private var nextWeekIntent = ""
+    @State private var editorFrames: [WeeklyReviewField: CGRect] = [:]
+    @FocusState private var focusedField: WeeklyReviewField?
 
     private var scheduledDate: Date? {
         ISO8601DateFormatter.echo.date(from: presentation.scheduledFor)
@@ -79,12 +97,14 @@ struct WeeklyReviewView: View {
                     reviewField(
                         title: "How did this week go?",
                         placeholder: "What stood out? What worked? What didn’t?",
-                        text: $reflection
+                        text: $reflection,
+                        field: .reflection
                     )
                     reviewField(
                         title: "What do you want to do next week?",
                         placeholder: "Name the few things you want to carry forward.",
-                        text: $nextWeekIntent
+                        text: $nextWeekIntent,
+                        field: .nextWeekIntent
                     )
                 }
                 .padding(20)
@@ -116,6 +136,15 @@ struct WeeklyReviewView: View {
         }
         .foregroundStyle(EchoTheme.textPrimary)
         .background(EchoTheme.canvas.ignoresSafeArea())
+        .coordinateSpace(name: "weekly-review")
+        .onPreferenceChange(WeeklyReviewEditorFramesKey.self) { editorFrames = $0 }
+        .simultaneousGesture(
+            SpatialTapGesture(coordinateSpace: .named("weekly-review"))
+                .onEnded { tap in
+                    guard !editorFrames.values.contains(where: { $0.contains(tap.location) }) else { return }
+                    focusedField = nil
+                }
+        )
     }
 
     private var reviewDateLabel: String {
@@ -123,11 +152,17 @@ struct WeeklyReviewView: View {
         return "Week ending \(scheduledDate.formatted(.dateTime.month(.wide).day().year()))"
     }
 
-    private func reviewField(title: String, placeholder: String, text: Binding<String>) -> some View {
+    private func reviewField(
+        title: String,
+        placeholder: String,
+        text: Binding<String>,
+        field: WeeklyReviewField
+    ) -> some View {
         VStack(alignment: .leading, spacing: 10) {
             Text(title)
                 .font(.system(size: 17, weight: .bold))
             TextEditor(text: text)
+                .focused($focusedField, equals: field)
                 .font(.system(size: 16))
                 .foregroundStyle(EchoTheme.textPrimary)
                 .scrollContentBackground(.hidden)
@@ -144,6 +179,14 @@ struct WeeklyReviewView: View {
                             .allowsHitTesting(false)
                     }
                     RoundedRectangle(cornerRadius: 18).stroke(EchoTheme.border, lineWidth: 1)
+                }
+                .background {
+                    GeometryReader { proxy in
+                        Color.clear.preference(
+                            key: WeeklyReviewEditorFramesKey.self,
+                            value: [field: proxy.frame(in: .named("weekly-review"))]
+                        )
+                    }
                 }
         }
     }

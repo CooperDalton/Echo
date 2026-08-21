@@ -11,8 +11,6 @@ struct EchoQueueView: View {
         store.state.allNotes
             .filter { $0.echo.enabled && $0.bucket == nil && EchoScheduler.isDue($0.echo) }
             .sorted { $0.echo.nextDueAt < $1.echo.nextDueAt }
-            .prefix(3)
-            .map { $0 }
     }
 
     private var queue: [EchoNote] {
@@ -133,15 +131,6 @@ struct EchoQueueView: View {
                     }
                     .buttonStyle(.plain)
                 }
-                Text("No more echoes today. Max 3 per day.")
-                    .foregroundStyle(EchoTheme.textSecondary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(14)
-                    .background(EchoTheme.surfaceRaised, in: .rect(cornerRadius: 18, style: .continuous))
-                    .overlay {
-                        RoundedRectangle(cornerRadius: 18)
-                            .stroke(EchoTheme.border, style: StrokeStyle(lineWidth: 1, dash: [5]))
-                    }
             }
         }
     }

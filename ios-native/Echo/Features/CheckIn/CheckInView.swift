@@ -117,7 +117,9 @@ private struct CheckInDetailModal: View {
 
     var body: some View {
         ZStack {
-            Color.black.opacity(0.42).ignoresSafeArea().onTapGesture { dismiss() }
+            Color.black.opacity(0.42).ignoresSafeArea().onTapGesture {
+                saveChanges()
+            }
             VStack(spacing: 18) {
                 HStack(alignment: .top, spacing: 16) {
                     VStack(alignment: .leading, spacing: 4) {
@@ -128,15 +130,6 @@ private struct CheckInDetailModal: View {
                             .foregroundStyle(EchoTheme.textSecondary)
                     }
                     Spacer()
-                    Button { dismiss() } label: {
-                        Image(systemName: "xmark")
-                            .font(.system(size: 16))
-                            .frame(width: 36, height: 36)
-                    }
-                    .foregroundStyle(EchoTheme.textPrimary)
-                    .background(EchoTheme.surfaceRaised, in: .circle)
-                    .overlay { Circle().stroke(EchoTheme.border, lineWidth: 1) }
-                    .accessibilityLabel("Close check-in details")
                 }
 
                 Menu {
@@ -185,25 +178,6 @@ private struct CheckInDetailModal: View {
                 .frame(height: 330)
                 .background(EchoTheme.surfaceRaised, in: .rect(cornerRadius: 18, style: .continuous))
                 .overlay { RoundedRectangle(cornerRadius: 18).stroke(EchoTheme.border, lineWidth: 1) }
-
-                HStack(spacing: 10) {
-                    Button("Cancel") { dismiss() }
-                        .buttonStyle(EchoCapsuleButtonStyle(filled: false, minHeight: 52))
-                        .frame(maxWidth: .infinity)
-                    Button("Save changes") {
-                        store.updateCheckIn(
-                            id: checkInID,
-                            energy: energy,
-                            emotions: selectedEmotion.map { [$0] } ?? [],
-                            body: bodyText
-                        )
-                        dismiss()
-                    }
-                    .buttonStyle(EchoCapsuleButtonStyle(filled: true, minHeight: 52))
-                    .frame(maxWidth: .infinity)
-                    .disabled(bodyText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                }
-                .frame(minHeight: 52)
             }
             .padding(.horizontal, 18)
             .padding(.vertical, 18)
@@ -217,6 +191,19 @@ private struct CheckInDetailModal: View {
             selectedEmotion = checkInEmotions.first { checkIn.emotions[$0] == true }
             bodyText = checkIn.body
         }
+        .accessibilityAction(.escape) {
+            saveChanges()
+        }
+    }
+
+    private func saveChanges() {
+        store.updateCheckIn(
+            id: checkInID,
+            energy: energy,
+            emotions: selectedEmotion.map { [$0] } ?? [],
+            body: bodyText
+        )
+        dismiss()
     }
 
     private var timestamp: String {

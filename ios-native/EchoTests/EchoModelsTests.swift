@@ -83,6 +83,27 @@ struct EchoModelsTests {
         #expect(first.scheduledDates.first == "2026-08-11")
     }
 
+    @Test func tenNewEchoesSpreadTheirFirstAppearancesAcrossFiveDays() {
+        let now = Date(timeIntervalSince1970: 1_786_321_200)
+        var notes: [EchoNote] = []
+
+        for index in 0..<10 {
+            notes.append(ModelFactories.note(
+                body: "Kindle highlight \(index)",
+                echoEnabled: true,
+                existingNotes: notes,
+                now: now,
+                id: "kindle-highlight-\(index)"
+            ))
+        }
+
+        let firstAppearances = notes.compactMap { $0.echo.scheduledDates.first }
+        let countsByDate = Dictionary(grouping: firstAppearances, by: { $0 }).mapValues { $0.count }
+
+        #expect(countsByDate.count == 5)
+        #expect(countsByDate.values.allSatisfy { $0 == 2 })
+    }
+
     @Test func weeklyReviewUsesConfiguredWeekdayAndStopsBeingPendingAfterCompletion() throws {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = try #require(TimeZone(identifier: "America/Los_Angeles"))
@@ -203,19 +224,48 @@ struct EchoModelsTests {
     }
 
     @Test func widgetEntriesKeepExistingDeepLinkShape() {
+        let now = Date(timeIntervalSince1970: 1_786_321_200)
         var note = ModelFactories.note(
             body: "Open me from the widget",
             echoEnabled: true,
             existingNotes: [],
-            now: Date(timeIntervalSince1970: 1_786_321_200),
+            now: now,
             id: "note-widget"
         )
-        note.echo.nextDueAt = "2020-01-01T09:00:00.000Z"
+        note.echo.nextDueAt = ISO8601DateFormatter.echo.string(from: now)
         var state = NotesState.empty
         state.recent = [note]
 
-        let entry = WidgetBridge.entries(from: state).first
+        let entry = WidgetBridge.entries(from: state, now: now).first
         #expect(entry?.targetURL == "echo://note/note-widget")
+    }
+
+    @Test @MainActor func widgetNoteURLUsesEchoPresentation() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let store = EchoStore(persistence: EchoPersistence(directory: directory))
+        let url = try #require(URL(string: "echo://note/note-widget"))
+
+        store.handle(url: url)
+
+        #expect(store.selectedTab == .echo)
+        #expect(store.echoPath == [.note("note-widget")])
+        #expect(store.libraryPath.isEmpty)
+    }
+
+    @Test func widgetEntriesPreserveFiveLineStandingMessage() {
+        let message = "Tell your heart that the fear of suffering is worse than the suffering itself. And that no heart has suffered when it goes in search of its dreams, because every second of the search is a second's encounter with God and with eternity."
+        var state = NotesState.empty
+        state.standingMessages = [StandingMessage(
+            id: "standing-five-lines",
+            text: message,
+            createdAt: "2026-08-20T20:00:00.000Z",
+            updatedAt: "2026-08-20T20:00:00.000Z"
+        )]
+
+        let entry = WidgetBridge.entries(from: state).first
+
+        #expect(entry?.text == message)
     }
 
     @Test func reviewedEchoRemainsVisibleForTheDayItSurfaced() throws {
@@ -247,7 +297,9 @@ struct EchoModelsTests {
         state.reviewed = [note]
 
         #expect(WidgetBridge.entries(from: state, now: laterToday).first?.text == "Keep me visible today")
-        #expect(WidgetBridge.entries(from: state, now: tomorrow).isEmpty)
+        let tomorrowEntries = WidgetBridge.entries(from: state, now: tomorrow)
+        #expect(tomorrowEntries.allSatisfy { $0.kind != .echo })
+        #expect(tomorrowEntries.first?.kind == .empty)
     }
 
     @Test @MainActor func categoryEditsRenameExistingNoteAssignments() throws {
@@ -278,6 +330,260 @@ struct EchoModelsTests {
         #expect(store.state.bucketPreferences.customs.first?.name == "Learning")
         #expect(store.note(id: "note-category")?.bucket == "Learning")
         #expect(try persistence.loadState().recent.first?.bucket == "Learning")
+    }
+
+    @Test @MainActor func unavailableCategorizationDoesNotLeaveNewNotePending() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let persistence = EchoPersistence(directory: directory)
+        try persistence.saveConfig(EchoSyncConfig(
+            apiBaseUrl: nil,
+            apiToken: nil,
+            deviceId: "test-device",
+            syncEnabled: true,
+            aiCategorizationEnabled: true
+        ))
+        let store = EchoStore(persistence: persistence)
+
+        let noteID = try #require(store.addNote(body: "A note without a configured backend", echoEnabled: false))
+
+        #expect(store.note(id: noteID)?.classificationStatus == .failed)
+        #expect(store.note(id: noteID)?.bucket == nil)
+        #expect(try persistence.loadState().recent.first?.classificationStatus == .failed)
+    }
+
+    @Test @MainActor func launchSettlesAnExistingPendingNoteWhenCategorizationIsUnavailable() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let persistence = EchoPersistence(directory: directory)
+        var state = NotesState.empty
+        state.recent = [ModelFactories.note(
+            body: "This note was interrupted while categorizing",
+            echoEnabled: false,
+            existingNotes: [],
+            id: "note-stuck"
+        )]
+        try persistence.saveState(state)
+        try persistence.saveConfig(EchoSyncConfig(
+            apiBaseUrl: nil,
+            apiToken: nil,
+            deviceId: "test-device",
+            syncEnabled: true,
+            aiCategorizationEnabled: true
+        ))
+        let store = EchoStore(persistence: persistence)
+
+        store.resumePendingClassifications()
+
+        #expect(store.note(id: "note-stuck")?.classificationStatus == .failed)
+        #expect(try persistence.loadState().recent.first?.classificationStatus == .failed)
+    }
+
+    @Test @MainActor func editingANoteRestartsItsCategorizationStateMachine() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let persistence = EchoPersistence(directory: directory)
+        var note = ModelFactories.note(
+            body: "Original note",
+            echoEnabled: false,
+            existingNotes: [],
+            id: "note-edited"
+        )
+        note.classificationStatus = .classified
+        note.bucket = "Ideas"
+        var state = NotesState.empty
+        state.recent = [note]
+        state.bucketPreferences.customs = [
+            BucketDraft(name: "Ideas", description: "Things to consider", colorKey: "mint")
+        ]
+        try persistence.saveState(state)
+        try persistence.saveConfig(EchoSyncConfig(
+            apiBaseUrl: nil,
+            apiToken: nil,
+            deviceId: "test-device",
+            syncEnabled: true,
+            aiCategorizationEnabled: true
+        ))
+        let store = EchoStore(persistence: persistence)
+
+        store.updateNote(id: "note-edited", body: "A completely different thought")
+
+        #expect(store.note(id: "note-edited")?.body == "A completely different thought")
+        #expect(store.note(id: "note-edited")?.bucket == nil)
+        #expect(store.note(id: "note-edited")?.classificationStatus == .failed)
+        #expect(store.note(id: "note-edited")?.classificationMethod == .unknown)
+    }
+
+    @Test @MainActor func launchDoesNotGuessForAnExistingFailedNoteWithoutABackend() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let persistence = EchoPersistence(directory: directory)
+        var note = ModelFactories.note(
+            body: "Make a tiny weather app",
+            echoEnabled: false,
+            existingNotes: [],
+            id: "note-failed"
+        )
+        note.classificationStatus = .failed
+        var state = NotesState.empty
+        state.recent = [note]
+        state.bucketPreferences.customs = [
+            BucketDraft(name: "Ideas", description: "Things I might build", colorKey: "mint")
+        ]
+        try persistence.saveState(state)
+        try persistence.saveConfig(EchoSyncConfig(
+            apiBaseUrl: nil,
+            apiToken: nil,
+            deviceId: "test-device",
+            syncEnabled: true,
+            aiCategorizationEnabled: true
+        ))
+        let store = EchoStore(persistence: persistence)
+
+        store.resumePendingClassifications()
+
+        #expect(store.note(id: "note-failed")?.bucket == nil)
+        #expect(store.note(id: "note-failed")?.classificationStatus == .failed)
+        #expect(store.note(id: "note-failed")?.classificationMethod == .unknown)
+    }
+
+    @Test @MainActor func launchClearsALegacyKeywordClassification() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let persistence = EchoPersistence(directory: directory)
+        var note = ModelFactories.note(
+            body: "Player should get XP for crafting a thing they've never forged before",
+            echoEnabled: false,
+            existingNotes: [],
+            id: "legacy-keyword-note"
+        )
+        note.bucket = "Reflections"
+        note.classificationStatus = .classified
+        note.classificationMethod = .keyword
+        note.classificationConfidence = 0.56
+        var state = NotesState.empty
+        state.recent = [note]
+        state.bucketPreferences.customs = [
+            BucketDraft(name: "Work", description: "Tasks and professional projects", colorKey: "mint"),
+            BucketDraft(name: "Reflections", description: "Personal thoughts and observations", colorKey: "purple"),
+        ]
+        try persistence.saveState(state)
+        try persistence.saveConfig(EchoSyncConfig(
+            apiBaseUrl: nil,
+            apiToken: nil,
+            deviceId: "test-device",
+            syncEnabled: true,
+            aiCategorizationEnabled: true
+        ))
+        let store = EchoStore(persistence: persistence)
+
+        store.resumePendingClassifications()
+
+        #expect(store.note(id: "legacy-keyword-note")?.bucket == nil)
+        #expect(store.note(id: "legacy-keyword-note")?.classificationStatus == .failed)
+        #expect(store.note(id: "legacy-keyword-note")?.classificationMethod == .unknown)
+        #expect(store.note(id: "legacy-keyword-note")?.classificationConfidence == nil)
+    }
+
+    @Test @MainActor func aNoteStaysUnbucketedWithoutABackend() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let persistence = EchoPersistence(directory: directory)
+        var state = NotesState.empty
+        state.bucketPreferences.customs = [
+            BucketDraft(name: "Work", description: "Tasks and professional projects", colorKey: "mint"),
+            BucketDraft(name: "Reflections", description: "Personal thoughts and observations", colorKey: "purple"),
+        ]
+        try persistence.saveState(state)
+        try persistence.saveConfig(EchoSyncConfig(
+            apiBaseUrl: nil,
+            apiToken: nil,
+            deviceId: "test-device",
+            syncEnabled: true,
+            aiCategorizationEnabled: true
+        ))
+        let store = EchoStore(persistence: persistence)
+
+        let noteID = try #require(store.addNote(
+            body: "Player should get XP for crafting a thing they've never forged before",
+            echoEnabled: false
+        ))
+
+        #expect(store.note(id: noteID)?.bucket == nil)
+        #expect(store.note(id: noteID)?.classificationStatus == .failed)
+        #expect(store.note(id: noteID)?.classificationMethod == .unknown)
+    }
+
+    @Test @MainActor func aFailedAIRequestLeavesTheNoteUnbucketed() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let persistence = EchoPersistence(directory: directory)
+        var state = NotesState.empty
+        state.bucketPreferences.customs = [
+            BucketDraft(name: "Work", description: "Tasks and professional projects", colorKey: "mint"),
+            BucketDraft(name: "Reflections", description: "Personal thoughts and observations", colorKey: "purple"),
+        ]
+        try persistence.saveState(state)
+        try persistence.saveConfig(EchoSyncConfig(
+            apiBaseUrl: "https://[",
+            apiToken: "test-token",
+            deviceId: "test-device",
+            syncEnabled: true,
+            aiCategorizationEnabled: true
+        ))
+        let store = EchoStore(persistence: persistence)
+
+        let noteID = try #require(store.addNote(body: "A note that needs the LLM", echoEnabled: false))
+        for _ in 0..<100 where store.note(id: noteID)?.classificationStatus == .pending {
+            await Task.yield()
+        }
+
+        #expect(store.note(id: noteID)?.bucket == nil)
+        #expect(store.note(id: noteID)?.classificationStatus == .failed)
+        #expect(store.note(id: noteID)?.classificationMethod == .unknown)
+    }
+
+    @Test func anUnreviewedEchoExpiresAfterTheDayItSurfaced() throws {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = try #require(TimeZone(identifier: "America/Denver"))
+        let surfacedAt = try #require(calendar.date(from: DateComponents(
+            year: 2026, month: 8, day: 19, hour: 9
+        )))
+        let laterThatDay = try #require(calendar.date(from: DateComponents(
+            year: 2026, month: 8, day: 19, hour: 18
+        )))
+        let nextDay = try #require(calendar.date(from: DateComponents(
+            year: 2026, month: 8, day: 20, hour: 9
+        )))
+        var note = ModelFactories.note(
+            body: "This should not stay on the widget forever",
+            echoEnabled: true,
+            existingNotes: [],
+            now: surfacedAt,
+            id: "note-expired-echo"
+        )
+        note.echo.nextDueAt = ISO8601DateFormatter.echo.string(from: surfacedAt)
+        note.echo.scheduledDates = ["2026-08-19"]
+        var state = NotesState.empty
+        state.recent = [note]
+
+        let sameDayEntries = WidgetBridge.entries(from: state, now: laterThatDay)
+        let nextDayEntries = WidgetBridge.entries(from: state, now: nextDay)
+
+        #expect(sameDayEntries.contains { $0.kind == .echo })
+        #expect(nextDayEntries.allSatisfy { $0.kind != .echo })
+        #expect(nextDayEntries.first?.kind == .empty)
+
+        state.standingMessages = [StandingMessage(
+            id: "standing-1",
+            text: "Keep going",
+            createdAt: ISO8601DateFormatter.echo.string(from: surfacedAt),
+            updatedAt: ISO8601DateFormatter.echo.string(from: surfacedAt)
+        )]
+        let entriesWithStandingMessage = WidgetBridge.entries(from: state, now: nextDay)
+
+        #expect(entriesWithStandingMessage.allSatisfy { $0.kind != .echo })
+        #expect(entriesWithStandingMessage.first?.kind == .standing)
     }
 
     @Test @MainActor func standingMessagesCheckInsAndWidgetPreferencesPersist() throws {

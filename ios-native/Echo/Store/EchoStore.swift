@@ -21,6 +21,8 @@ final class EchoStore {
     private let persistence: EchoPersistence
     @ObservationIgnored private var isDirty = false
     @ObservationIgnored private var autoSyncTask: Task<Void, Never>?
+    @ObservationIgnored private var classificationTasks: [String: Task<Void, Never>] = [:]
+    @ObservationIgnored private var classificationVersions: [String: String] = [:]
 
     init(persistence: EchoPersistence = EchoPersistence()) {
         self.persistence = persistence
@@ -78,6 +80,9 @@ final class EchoStore {
         note.widgetText = ModelFactories.compactWidgetText(trimmed)
         replace(note)
         persist(markDirty: true)
+        if !nextEnabled {
+            classifyIfPossible(noteID: note.id)
+        }
     }
 
     func markReviewed(_ id: String) {
@@ -147,7 +152,7 @@ final class EchoStore {
         }) else { return }
         state.bucketPreferences.customs.append(normalized)
         persist(markDirty: true)
-        classifyPendingNotes()
+        classifyUnbucketedNotes(includingFailed: true)
     }
 
     func updateBucket(at index: Int, with draft: BucketDraft) {
@@ -188,7 +193,7 @@ final class EchoStore {
         state.recent = state.recent.map(clearingBucket)
         state.reviewed = state.reviewed.map(clearingBucket)
         persist(markDirty: true)
-        classifyPendingNotes()
+        classifyUnbucketedNotes(includingFailed: true)
     }
 
     func upsertStandingMessage(id: String?, text: String) {
@@ -385,6 +390,7 @@ final class EchoStore {
             persistenceError = "Sync settings could not be saved: \(error.localizedDescription)"
         }
         if updated.isConfigured { scheduleAutoSync() }
+        resumePendingClassifications()
     }
 
     func syncNow() async {
@@ -407,13 +413,17 @@ final class EchoStore {
     }
 
     func syncOnLaunch() async {
-        guard config.isConfigured else { return }
-        await syncNow()
+        if config.isConfigured {
+            await syncNow()
+        }
+        resumePendingClassifications()
     }
 
     func syncOnForeground() async {
-        guard config.isConfigured, syncIsStale else { return }
-        await syncNow()
+        if config.isConfigured, syncIsStale {
+            await syncNow()
+        }
+        resumePendingClassifications()
     }
 
     func syncBeforeBackground() async {
@@ -453,8 +463,8 @@ final class EchoStore {
         guard parts.count >= 2 else { return }
         switch parts[0] {
         case "note":
-            selectedTab = .library
-            libraryPath = [.note(parts[1].removingPercentEncoding ?? parts[1])]
+            selectedTab = .echo
+            echoPath = [.note(parts[1].removingPercentEncoding ?? parts[1])]
         case "standing":
             selectedTab = .echo
             echoPath = [.standing(parts[1].removingPercentEncoding ?? parts[1])]
@@ -490,40 +500,127 @@ final class EchoStore {
         refreshReminderSchedule(requestPermission: true)
     }
 
+    func resumePendingClassifications() {
+        clearLegacyKeywordClassifications()
+        if categorizationIsAvailable {
+            classifyUnbucketedNotes(includingFailed: true)
+        } else {
+            settlePendingClassifications()
+        }
+    }
+
+    private func clearLegacyKeywordClassifications() {
+        var changed = false
+        func clearingKeywordResult(_ note: EchoNote) -> EchoNote {
+            guard note.classificationMethod == .keyword else { return note }
+            var result = note
+            result.bucket = nil
+            result.classificationStatus = .pending
+            result.classificationMethod = .unknown
+            result.classificationConfidence = nil
+            changed = true
+            return result
+        }
+
+        state.recent = state.recent.map(clearingKeywordResult)
+        state.reviewed = state.reviewed.map(clearingKeywordResult)
+        if changed {
+            persist(markDirty: true)
+        }
+    }
+
     private func classifyIfPossible(noteID: String) {
-        guard config.aiCategorizationEnabled, config.isConfigured, !state.bucketPreferences.customs.isEmpty else { return }
+        guard
+            let snapshot = note(id: noteID),
+            !snapshot.echo.enabled,
+            snapshot.bucket == nil,
+            snapshot.classificationStatus == .pending
+        else { return }
+        guard categorizationIsAvailable else {
+            markClassificationFailed(noteID: noteID, updatedAt: snapshot.updatedAt)
+            return
+        }
         let config = config
         let buckets = state.bucketPreferences.customs
-        guard let snapshot = note(id: noteID) else { return }
-        Task {
+
+        classificationTasks[noteID]?.cancel()
+        classificationVersions[noteID] = snapshot.updatedAt
+        let task = Task { [weak self] in
+            guard let self else { return }
+            defer {
+                if classificationVersions[noteID] == snapshot.updatedAt {
+                    classificationTasks[noteID] = nil
+                    classificationVersions[noteID] = nil
+                }
+            }
             do {
                 let response = try await EchoAPIClient(config: config).classify(note: snapshot, buckets: buckets)
+                guard !Task.isCancelled else { return }
                 guard
-                    let title = response.title?.trimmingCharacters(in: .whitespacesAndNewlines),
-                    let bucket = response.bucket,
-                    buckets.contains(where: { $0.name == bucket }),
-                    var note = note(id: noteID)
+                    var note = note(id: noteID),
+                    note.updatedAt == snapshot.updatedAt
                 else { return }
+                let title = response.title.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !title.isEmpty, buckets.contains(where: { $0.name == response.bucket }) else {
+                    markClassificationFailed(noteID: noteID, updatedAt: snapshot.updatedAt)
+                    return
+                }
                 note.title = snapshot.body.count <= 32 ? ModelFactories.noteTitle(from: snapshot.body) : title
-                note.bucket = bucket
+                note.bucket = response.bucket
                 note.classificationStatus = .classified
                 note.classificationMethod = .ai
                 note.classificationConfidence = response.confidence
                 replace(note)
                 persist(markDirty: true)
             } catch {
-                guard var note = note(id: noteID) else { return }
-                note.classificationStatus = .failed
+                guard !Task.isCancelled else { return }
+                markClassificationFailed(noteID: noteID, updatedAt: snapshot.updatedAt)
+            }
+        }
+        classificationTasks[noteID] = task
+    }
+
+    private func classifyUnbucketedNotes(includingFailed: Bool = false) {
+        let candidates = state.allNotes.filter { note in
+            !note.echo.enabled
+                && note.bucket == nil
+                && (note.classificationStatus == .pending
+                    || (includingFailed && note.classificationStatus == .failed))
+        }
+        for var note in candidates {
+            if note.classificationStatus == .failed {
+                note.classificationStatus = .pending
+                note.classificationMethod = .unknown
+                note.classificationConfidence = nil
                 replace(note)
                 persist(markDirty: true)
             }
+            classifyIfPossible(noteID: note.id)
         }
     }
 
-    private func classifyPendingNotes() {
-        for note in state.allNotes where !note.echo.enabled && note.bucket == nil && note.classificationStatus == .pending {
-            classifyIfPossible(noteID: note.id)
+    private var categorizationIsAvailable: Bool {
+        config.aiCategorizationEnabled
+            && config.isConfigured
+            && !state.bucketPreferences.customs.isEmpty
+    }
+
+    private func settlePendingClassifications() {
+        let pending = state.allNotes.filter {
+            !$0.echo.enabled && $0.bucket == nil && $0.classificationStatus == .pending
         }
+        for note in pending {
+            markClassificationFailed(noteID: note.id, updatedAt: note.updatedAt)
+        }
+    }
+
+    private func markClassificationFailed(noteID: String, updatedAt: String) {
+        guard var note = note(id: noteID), note.updatedAt == updatedAt else { return }
+        note.classificationStatus = .failed
+        note.classificationMethod = .unknown
+        note.classificationConfidence = nil
+        replace(note)
+        persist(markDirty: true)
     }
 
     private func normalizedBucket(_ draft: BucketDraft) -> BucketDraft {

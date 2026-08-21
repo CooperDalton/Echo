@@ -69,33 +69,36 @@ struct EchoWidgetView: View {
     }
 
     private func row(_ item: WidgetEntryPayload, index: Int) -> some View {
-        HStack(alignment: .top, spacing: family == .systemSmall ? 11 : 9) {
-            RoundedRectangle(cornerRadius: 2, style: .continuous)
-                .fill(markerColor(for: item.kind))
-                .frame(width: family == .systemSmall ? 4 : 3)
-                .frame(maxHeight: .infinity)
-
-            Text(item.text)
-                .font(.system(size: fontSize, weight: .medium, design: .rounded))
-                .foregroundStyle(item.kind == .empty ? textSecondary : textPrimary)
-                .lineSpacing(family == .systemSmall ? 3 : 2)
-                .lineLimit(rowLimit(index))
-                .minimumScaleFactor(0.88)
-                .frame(maxWidth: .infinity, alignment: .leading)
-        }
-        .padding(.horizontal, 2)
-        .padding(.vertical, family == .systemSmall ? 5 : 4)
-        .frame(
-            maxWidth: .infinity,
-            maxHeight: family == .systemSmall ? .infinity : nil,
-            alignment: .topLeading
-        )
+        Text(item.text)
+            .font(.system(size: fontSize, weight: .medium, design: .rounded))
+            .foregroundStyle(item.kind == .empty ? textSecondary : textPrimary)
+            .lineSpacing(family == .systemSmall ? 3 : 2)
+            .lineLimit(rowLimit(index))
+            .minimumScaleFactor(0.88)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.leading, family == .systemSmall ? 15 : 12)
+            .overlay(alignment: .leading) {
+                RoundedRectangle(cornerRadius: 2, style: .continuous)
+                    .fill(markerColor(for: item.kind))
+                    .frame(width: family == .systemSmall ? 4 : 3)
+            }
+            .padding(.horizontal, 2)
+            .padding(.vertical, family == .systemSmall ? 5 : 4)
+            .frame(
+                maxWidth: .infinity,
+                maxHeight: family == .systemSmall ? .infinity : nil,
+                alignment: .topLeading
+            )
     }
 
     private func rowLimit(_ index: Int) -> Int {
         if family == .systemSmall { return 5 }
         if family == .systemLarge { return index == 0 ? 4 : 3 }
-        return 2
+        switch visibleEntries.count {
+        case 1: return 5
+        case 2: return 5
+        default: return 2
+        }
     }
 
     private var fontSize: CGFloat {

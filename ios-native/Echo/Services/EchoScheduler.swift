@@ -2,7 +2,14 @@ import Foundation
 
 enum EchoScheduler {
     private static let intervalRanges = [(4, 9), (12, 18), (30, 45), (60, 90), (120, 180)]
+    private static let maximumFirstAppearancesPerDay = 2
+    private static let maximumOccurrencesPerDay = 3
     private static let calendar = Calendar.current
+
+    private struct ScheduleOccupancy {
+        var allOccurrences: [String: Int] = [:]
+        var firstAppearances: [String: Int] = [:]
+    }
 
     static func createSchedule(
         noteID: String,
@@ -13,7 +20,7 @@ enum EchoScheduler {
         var occupancy = occupancyFromNotes(existingNotes, ignoredNoteID: noteID)
         let parsed = ISO8601DateFormatter.echo.date(from: createdAt) ?? .now
         var cursor = calendar.date(byAdding: .day, value: 1, to: calendar.startOfDay(for: parsed)) ?? parsed
-        var scheduledDates = [nextAvailableDate(cursor, occupancy: &occupancy)]
+        var scheduledDates = [nextAvailableDate(cursor, isFirstAppearance: true, occupancy: &occupancy)]
 
         for (index, range) in intervalRanges.enumerated() {
             cursor = calendar.date(
@@ -21,7 +28,7 @@ enum EchoScheduler {
                 value: intervalForRange(seed: seed, index: index, range: range),
                 to: cursor
             ) ?? cursor
-            scheduledDates.append(nextAvailableDate(cursor, occupancy: &occupancy))
+            scheduledDates.append(nextAvailableDate(cursor, isFirstAppearance: false, occupancy: &occupancy))
         }
 
         return EchoSchedule(
@@ -94,23 +101,37 @@ enum EchoScheduler {
     private static func occupancyFromNotes(
         _ notes: [EchoNote],
         ignoredNoteID: String
-    ) -> [String: Int] {
-        var result: [String: Int] = [:]
+    ) -> ScheduleOccupancy {
+        var result = ScheduleOccupancy()
         for note in notes where note.id != ignoredNoteID && note.echo.enabled && note.bucket == nil {
-            for day in note.echo.scheduledDates {
-                result[day, default: 0] += 1
+            for (index, day) in note.echo.scheduledDates.enumerated() {
+                result.allOccurrences[day, default: 0] += 1
+                if index == 0 {
+                    result.firstAppearances[day, default: 0] += 1
+                }
             }
         }
         return result
     }
 
-    private static func nextAvailableDate(_ date: Date, occupancy: inout [String: Int]) -> String {
+    private static func nextAvailableDate(
+        _ date: Date,
+        isFirstAppearance: Bool,
+        occupancy: inout ScheduleOccupancy
+    ) -> String {
         var candidate = calendar.startOfDay(for: date)
-        while occupancy[dateKey(candidate), default: 0] >= 3 {
+        while
+            occupancy.allOccurrences[dateKey(candidate), default: 0] >= maximumOccurrencesPerDay
+                || (isFirstAppearance
+                    && occupancy.firstAppearances[dateKey(candidate), default: 0] >= maximumFirstAppearancesPerDay)
+        {
             candidate = calendar.date(byAdding: .day, value: 1, to: candidate) ?? candidate
         }
         let key = dateKey(candidate)
-        occupancy[key, default: 0] += 1
+        occupancy.allOccurrences[key, default: 0] += 1
+        if isFirstAppearance {
+            occupancy.firstAppearances[key, default: 0] += 1
+        }
         return key
     }
 }

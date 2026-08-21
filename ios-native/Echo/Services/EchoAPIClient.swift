@@ -37,9 +37,9 @@ struct SyncResponseBody: Codable, Sendable {
 }
 
 struct ClassificationResponse: Codable, Sendable {
-    var title: String?
-    var bucket: String?
-    var confidence: Double?
+    let title: String
+    let bucket: String
+    let confidence: Double
     var method: String?
     var model: String?
 }

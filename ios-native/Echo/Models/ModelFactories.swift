@@ -1,7 +1,7 @@
 import Foundation
 
 enum ModelFactories {
-    static let widgetTextLimit = 180
+    static let widgetTextLimit = 240
 
     static func noteTitle(from body: String) -> String {
         let compact = body.split(whereSeparator: \.isWhitespace).joined(separator: " ")
