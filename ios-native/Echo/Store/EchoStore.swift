@@ -70,17 +70,23 @@ final class EchoStore {
             )
         }
         note.echo.enabled = nextEnabled
+        let keepsManualCategory = note.classificationMethod == .manual && note.bucket != nil
         note.body = trimmed
         note.title = ModelFactories.noteTitle(from: trimmed)
         note.updatedAt = ISO8601DateFormatter.echo.string(from: .now)
-        note.bucket = nil
-        note.classificationStatus = nextEnabled ? .classified : .pending
-        note.classificationMethod = .unknown
-        note.classificationConfidence = nil
+        if keepsManualCategory {
+            note.classificationStatus = .classified
+            note.classificationConfidence = nil
+        } else {
+            note.bucket = nil
+            note.classificationStatus = nextEnabled ? .classified : .pending
+            note.classificationMethod = .unknown
+            note.classificationConfidence = nil
+        }
         note.widgetText = ModelFactories.compactWidgetText(trimmed)
         replace(note)
         persist(markDirty: true)
-        if !nextEnabled {
+        if !nextEnabled && !keepsManualCategory {
             classifyIfPossible(noteID: note.id)
         }
     }
@@ -153,6 +159,24 @@ final class EchoStore {
         state.bucketPreferences.customs.append(normalized)
         persist(markDirty: true)
         classifyUnbucketedNotes(includingFailed: true)
+    }
+
+    func overrideCategory(noteID: String, bucketName: String) {
+        guard
+            let bucket = state.bucketPreferences.customs.first(where: { $0.name == bucketName }),
+            var note = note(id: noteID)
+        else { return }
+
+        classificationTasks[noteID]?.cancel()
+        classificationTasks[noteID] = nil
+        classificationVersions[noteID] = nil
+        note.bucket = bucket.name
+        note.classificationStatus = .classified
+        note.classificationMethod = .manual
+        note.classificationConfidence = nil
+        note.updatedAt = ISO8601DateFormatter.echo.string(from: .now)
+        replace(note)
+        persist(markDirty: true)
     }
 
     func updateBucket(at index: Int, with draft: BucketDraft) {

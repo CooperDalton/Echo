@@ -1,7 +1,7 @@
 export type BucketName = string;
 
 export type NoteClassificationStatus = 'pending' | 'classified' | 'failed';
-export type NoteClassificationMethod = 'ai' | 'keyword' | 'unknown';
+export type NoteClassificationMethod = 'ai' | 'manual' | 'keyword' | 'unknown';
 
 export type EchoSchedule = {
   enabled: boolean;

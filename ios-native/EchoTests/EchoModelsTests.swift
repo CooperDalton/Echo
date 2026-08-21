@@ -332,6 +332,78 @@ struct EchoModelsTests {
         #expect(try persistence.loadState().recent.first?.bucket == "Learning")
     }
 
+    @Test @MainActor func manualCategoryOverrideSurvivesLaterNoteEdits() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let persistence = EchoPersistence(directory: directory)
+        var note = ModelFactories.note(
+            body: "A thought I want to recategorize",
+            echoEnabled: false,
+            existingNotes: [],
+            id: "manual-category-note"
+        )
+        note.bucket = "Work"
+        note.classificationStatus = .classified
+        note.classificationMethod = .ai
+        note.classificationConfidence = 0.72
+        var state = NotesState.empty
+        state.recent = [note]
+        state.bucketPreferences.customs = [
+            BucketDraft(name: "Work", description: "Tasks and projects", colorKey: "mint"),
+            BucketDraft(name: "Reflections", description: "Personal thoughts", colorKey: "purple"),
+        ]
+        try persistence.saveState(state)
+        let store = EchoStore(persistence: persistence)
+
+        store.overrideCategory(noteID: note.id, bucketName: "Reflections")
+        store.updateNote(id: note.id, body: "An edited thought that should stay put")
+
+        #expect(store.note(id: note.id)?.bucket == "Reflections")
+        #expect(store.note(id: note.id)?.classificationStatus == .classified)
+        #expect(store.note(id: note.id)?.classificationMethod == .manual)
+        #expect(store.note(id: note.id)?.classificationConfidence == nil)
+        #expect(try persistence.loadState().recent.first?.classificationMethod == .manual)
+    }
+
+    @Test func manualCategoryOverrideWinsAgainstANewerSyncedAIResult() {
+        var manualNote = ModelFactories.note(
+            body: "Keep the human category",
+            echoEnabled: false,
+            existingNotes: [],
+            id: "manual-sync-note"
+        )
+        manualNote.updatedAt = "2026-08-21T16:00:00.000Z"
+        manualNote.bucket = "Reflections"
+        manualNote.classificationStatus = .classified
+        manualNote.classificationMethod = .manual
+
+        var aiNote = manualNote
+        aiNote.updatedAt = "2026-08-21T17:00:00.000Z"
+        aiNote.bucket = "Work"
+        aiNote.classificationMethod = .ai
+        aiNote.classificationConfidence = 0.91
+
+        var local = NotesState.empty
+        local.recent = [manualNote]
+        let response = SyncResponseBody(
+            notes: [aiNote],
+            checkIns: nil,
+            deletedNotes: nil,
+            bucketPreferences: nil,
+            standingMessages: nil,
+            weeklyReviews: nil,
+            weeklyReviewPreferences: nil,
+            dailyCheckInPreferences: nil,
+            syncedAt: nil,
+            summary: nil
+        )
+
+        let merged = SyncMerger.merge(local: local, response: response)
+
+        #expect(merged.recent.first?.bucket == "Reflections")
+        #expect(merged.recent.first?.classificationMethod == .manual)
+    }
+
     @Test @MainActor func unavailableCategorizationDoesNotLeaveNewNotePending() throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: directory) }

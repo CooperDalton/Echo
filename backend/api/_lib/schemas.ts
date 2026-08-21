@@ -21,7 +21,7 @@ export const noteSchema = z.object({
   updatedAt: z.string().min(1),
   bucket: z.string().min(1).nullable(),
   classificationStatus: z.enum(['pending', 'classified', 'failed']),
-  classificationMethod: z.enum(['ai', 'keyword', 'unknown']),
+  classificationMethod: z.enum(['ai', 'manual', 'keyword', 'unknown']),
   classificationConfidence: z.number().nullable(),
   widgetText: z.string().nullable().default(null),
   echo: z.object({

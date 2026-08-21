@@ -15,20 +15,12 @@ struct NoteDetailView: View {
     @FocusState private var editorFocused: Bool
 
     private var note: EchoNote? { store.note(id: noteID) }
+    private var buckets: [BucketDraft] { store.state.bucketPreferences.customs }
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
-                Button("Back") {
-                    saveDraft()
-                    dismiss()
-                }
-                    .font(.body)
-                    .foregroundStyle(EchoTheme.textPrimary)
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 8)
-                    .background(EchoTheme.surfaceRaised, in: .capsule)
-                    .overlay { Capsule().stroke(EchoTheme.border, lineWidth: 1) }
+                headerControls
 
                 if mode == .echo {
                     echoBody
@@ -62,6 +54,61 @@ struct NoteDetailView: View {
             saveDraft()
             isEditing = false
         }
+    }
+
+    private var headerControls: some View {
+        HStack(spacing: 10) {
+            Button("Back") {
+                saveDraft()
+                dismiss()
+            }
+            .font(.body)
+            .foregroundStyle(EchoTheme.textPrimary)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 8)
+            .background(EchoTheme.surfaceRaised, in: .capsule)
+            .overlay { Capsule().stroke(EchoTheme.border, lineWidth: 1) }
+
+            Menu {
+                ForEach(buckets, id: \.name) { bucket in
+                    Button {
+                        store.overrideCategory(noteID: noteID, bucketName: bucket.name)
+                    } label: {
+                        if note?.bucket == bucket.name {
+                            Label(bucket.name, systemImage: "checkmark")
+                        } else {
+                            Text(bucket.name)
+                        }
+                    }
+                }
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: "tag")
+                    Text(note?.bucket ?? "Category")
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                    Image(systemName: "chevron.down")
+                        .font(.system(size: 10, weight: .semibold))
+                }
+                .font(.system(size: 14))
+                .foregroundStyle(categoryTone.text)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+                .frame(maxWidth: 180)
+                .background(categoryTone.background, in: .capsule)
+                .overlay { Capsule().stroke(categoryTone.border, lineWidth: 1) }
+            }
+            .disabled(note == nil || buckets.isEmpty)
+            .accessibilityLabel("Override category")
+        }
+    }
+
+    private var categoryTone: BucketTone {
+        guard
+            let bucketName = note?.bucket,
+            let bucket = buckets.first(where: { $0.name == bucketName })
+        else { return .uncategorized }
+        return BucketPalette.tone(for: bucket.colorKey)
     }
 
     private func saveDraft() {

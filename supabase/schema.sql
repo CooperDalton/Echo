@@ -33,7 +33,7 @@ create table if not exists public.notes (
     classification_status in ('pending', 'classified', 'failed')
   ),
   classification_method text not null default 'unknown' check (
-    classification_method in ('ai', 'keyword', 'unknown')
+    classification_method in ('ai', 'manual', 'keyword', 'unknown')
   ),
   classification_confidence double precision check (
     classification_confidence is null

@@ -134,7 +134,15 @@ function mergeNotes(local: Note[], remote: Note[]): Note[] {
 
   local.forEach((note) => {
     const existing = map.get(note.id);
-    if (!existing || compareIsoDates(note.updatedAt, existing.updatedAt) > 0) {
+    if (!existing) {
+      map.set(note.id, note);
+      return;
+    }
+    const existingIsManual = existing.classificationMethod === 'manual';
+    const noteIsManual = note.classificationMethod === 'manual';
+    if (existingIsManual !== noteIsManual) {
+      if (noteIsManual) map.set(note.id, note);
+    } else if (compareIsoDates(note.updatedAt, existing.updatedAt) > 0) {
       map.set(note.id, note);
     }
   });

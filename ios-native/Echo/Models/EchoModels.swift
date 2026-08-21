@@ -8,6 +8,7 @@ enum NoteClassificationStatus: String, Codable, Hashable, Sendable {
 
 enum NoteClassificationMethod: String, Codable, Hashable, Sendable {
     case ai
+    case manual
     case keyword
     case unknown
 }

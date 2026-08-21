@@ -10,12 +10,8 @@ enum SyncMerger {
         )
         let deletedIDs = Set(deleted.map(\.id))
         let remoteNotes = response.notes ?? []
-        let notes = mergeByID(
-            local.allNotes,
-            remoteNotes,
-            id: \.id,
-            timestamp: \.updatedAt
-        ).filter { !deletedIDs.contains($0.id) }
+        let notes = mergeNotes(local.allNotes, remoteNotes)
+            .filter { !deletedIDs.contains($0.id) }
         let checkIns = mergeByID(
             local.checkIns,
             response.checkIns ?? [],
@@ -69,6 +65,24 @@ enum SyncMerger {
         guard let localUpdatedAt = local.updatedAt else { return remote.normalized }
         guard let remoteUpdatedAt = remote.updatedAt else { return local.normalized }
         return (localUpdatedAt >= remoteUpdatedAt ? local : remote).normalized
+    }
+
+    private static func mergeNotes(_ local: [EchoNote], _ remote: [EchoNote]) -> [EchoNote] {
+        var values: [String: EchoNote] = [:]
+        for note in local + remote {
+            guard let existing = values[note.id] else {
+                values[note.id] = note
+                continue
+            }
+            let existingIsManual = existing.classificationMethod == .manual
+            let noteIsManual = note.classificationMethod == .manual
+            if existingIsManual != noteIsManual {
+                if noteIsManual { values[note.id] = note }
+            } else if note.updatedAt >= existing.updatedAt {
+                values[note.id] = note
+            }
+        }
+        return Array(values.values)
     }
 
     private static func mergeByID<Value>(
