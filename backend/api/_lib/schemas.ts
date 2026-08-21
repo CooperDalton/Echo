@@ -19,22 +19,22 @@ export const noteSchema = z.object({
   body: z.string(),
   createdAt: z.string().min(1),
   updatedAt: z.string().min(1),
-  bucket: z.string().min(1).nullable(),
+  bucket: z.string().min(1).nullable().default(null),
   classificationStatus: z.enum(['pending', 'classified', 'failed']),
   classificationMethod: z.enum(['ai', 'manual', 'keyword', 'unknown']),
-  classificationConfidence: z.number().nullable(),
+  classificationConfidence: z.number().nullable().default(null),
   widgetText: z.string().nullable().default(null),
   echo: z.object({
     enabled: z.boolean(),
     state: z.enum(['new', 'due', 'reviewed']),
-    lastReviewedAt: z.string().nullable(),
+    lastReviewedAt: z.string().nullable().default(null),
     nextDueAt: z.string(),
     intervalDays: z.number(),
     ease: z.number(),
     occurrenceCount: z.number().default(0),
     scheduledDates: z.array(z.string()).default([]),
   }),
-  filePath: z.string().nullable(),
+  filePath: z.string().nullable().default(null),
 }) satisfies z.ZodType<Note>;
 
 export const checkInSchema = z.object({
@@ -50,12 +50,12 @@ export const checkInSchema = z.object({
     >
   ),
   body: z.string(),
-  filePath: z.string().nullable(),
+  filePath: z.string().nullable().default(null),
 }) satisfies z.ZodType<CheckIn>;
 
 export const deletedNoteSchema = z.object({
   id: z.string().min(1),
-  filePath: z.string().nullable(),
+  filePath: z.string().nullable().default(null),
   deletedAt: z.string().min(1),
 }) satisfies z.ZodType<DeletedNote>;
 
@@ -80,8 +80,8 @@ export const weeklyReviewPreferencesSchema = z.object({
   weekday: z.number().int().min(1).max(7),
   hour: z.number().int().min(0).max(23),
   minute: z.number().int().min(0).max(59),
-  startsAt: z.string().datetime().nullable(),
-  updatedAt: z.string().datetime().nullable(),
+  startsAt: z.string().datetime().nullable().default(null),
+  updatedAt: z.string().datetime().nullable().default(null),
 }) satisfies z.ZodType<WeeklyReviewPreferences>;
 
 export const dailyCheckInPreferencesSchema = z.object({
@@ -90,7 +90,7 @@ export const dailyCheckInPreferencesSchema = z.object({
     hour: z.number().int().min(0).max(23),
     minute: z.number().int().min(0).max(59),
   })).max(5),
-  updatedAt: z.string().datetime().nullable(),
+  updatedAt: z.string().datetime().nullable().default(null),
 }) satisfies z.ZodType<DailyCheckInPreferences>;
 
 export const bucketDraftSchema = z.object({

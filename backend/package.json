@@ -7,6 +7,7 @@
   },
   "scripts": {
     "compile": "tsc -p tsconfig.json",
+    "test": "tsx --test api/_lib/*.test.ts",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "vercel:build": "vercel build"
   },
