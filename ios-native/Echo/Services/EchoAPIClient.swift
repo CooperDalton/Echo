@@ -47,14 +47,19 @@ struct ClassificationResponse: Codable, Sendable {
 enum EchoAPIError: LocalizedError, Sendable {
     case notConfigured
     case invalidURL
-    case requestFailed(Int)
+    case requestFailed(status: Int, message: String?)
     case invalidResponse
 
     var errorDescription: String? {
         switch self {
         case .notConfigured: "Sync is not configured."
         case .invalidURL: "The Echo API URL is invalid."
-        case .requestFailed(let status): "Echo API request failed with status \(status)."
+        case .requestFailed(let status, let message):
+            if let message, !message.isEmpty {
+                "Echo API request failed with status \(status): \(message)"
+            } else {
+                "Echo API request failed with status \(status)."
+            }
         case .invalidResponse: "Echo API returned an invalid response."
         }
     }
@@ -124,7 +129,18 @@ struct EchoAPIClient: Sendable {
 
         let (data, response) = try await URLSession.shared.data(for: request)
         guard let http = response as? HTTPURLResponse else { throw EchoAPIError.invalidResponse }
-        guard (200..<300).contains(http.statusCode) else { throw EchoAPIError.requestFailed(http.statusCode) }
+        guard (200..<300).contains(http.statusCode) else {
+            throw Self.requestError(status: http.statusCode, data: data)
+        }
         return try JSONDecoder().decode(Response.self, from: data)
+    }
+
+    static func requestError(status: Int, data: Data) -> EchoAPIError {
+        struct ErrorBody: Decodable {
+            let error: String
+        }
+
+        let message = try? JSONDecoder().decode(ErrorBody.self, from: data).error
+        return .requestFailed(status: status, message: message)
     }
 }

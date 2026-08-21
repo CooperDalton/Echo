@@ -3,6 +3,13 @@ import Testing
 @testable import Echo
 
 struct EchoModelsTests {
+    @Test func apiErrorsIncludeTheServerReason() throws {
+        let data = Data(#"{"error":"Invalid sync payload."}"#.utf8)
+        let error = EchoAPIClient.requestError(status: 400, data: data)
+
+        #expect(error.errorDescription == "Echo API request failed with status 400: Invalid sync payload.")
+    }
+
     @Test func decodesExpoStateWithoutChangingFieldNames() throws {
         let json = """
         {
