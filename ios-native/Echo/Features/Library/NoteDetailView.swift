@@ -69,46 +69,16 @@ struct NoteDetailView: View {
             .background(EchoTheme.surfaceRaised, in: .capsule)
             .overlay { Capsule().stroke(EchoTheme.border, lineWidth: 1) }
 
-            Menu {
-                ForEach(buckets, id: \.name) { bucket in
-                    Button {
-                        store.overrideCategory(noteID: noteID, bucketName: bucket.name)
-                    } label: {
-                        if note?.bucket == bucket.name {
-                            Label(bucket.name, systemImage: "checkmark")
-                        } else {
-                            Text(bucket.name)
-                        }
-                    }
+            if mode == .library, note?.echo.enabled != true {
+                CategoryDropdown(
+                    buckets: buckets,
+                    selectedName: note?.bucket,
+                    isEnabled: note != nil && !buckets.isEmpty
+                ) { bucketName in
+                    store.overrideCategory(noteID: noteID, bucketName: bucketName)
                 }
-            } label: {
-                HStack(spacing: 6) {
-                    Image(systemName: "tag")
-                    Text(note?.bucket ?? "Category")
-                        .lineLimit(1)
-                        .truncationMode(.tail)
-                    Image(systemName: "chevron.down")
-                        .font(.system(size: 10, weight: .semibold))
-                }
-                .font(.system(size: 14))
-                .foregroundStyle(categoryTone.text)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 8)
-                .frame(maxWidth: 180)
-                .background(categoryTone.background, in: .capsule)
-                .overlay { Capsule().stroke(categoryTone.border, lineWidth: 1) }
             }
-            .disabled(note == nil || buckets.isEmpty)
-            .accessibilityLabel("Override category")
         }
-    }
-
-    private var categoryTone: BucketTone {
-        guard
-            let bucketName = note?.bucket,
-            let bucket = buckets.first(where: { $0.name == bucketName })
-        else { return .uncategorized }
-        return BucketPalette.tone(for: bucket.colorKey)
     }
 
     private func saveDraft() {

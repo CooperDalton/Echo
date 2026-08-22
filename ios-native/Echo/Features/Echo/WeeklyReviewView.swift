@@ -112,28 +112,34 @@ struct WeeklyReviewView: View {
             }
             .scrollDismissesKeyboard(.interactively)
 
-            HStack(spacing: 12) {
-                Button("Not now") {
-                    store.weeklyReviewPresentation = nil
-                }
-                .buttonStyle(EchoCapsuleButtonStyle(filled: false, minHeight: 48))
+            // Hidden while the keyboard is up: the row would otherwise sit
+            // directly above the keyboard and cover the editor being typed in.
+            if focusedField == nil {
+                HStack(spacing: 12) {
+                    Button("Not now") {
+                        store.weeklyReviewPresentation = nil
+                    }
+                    .buttonStyle(EchoCapsuleButtonStyle(filled: false, minHeight: 48))
 
-                Button("Save review") {
-                    store.saveWeeklyReview(
-                        scheduledFor: presentation.scheduledFor,
-                        reflection: reflection,
-                        nextWeekIntent: nextWeekIntent
-                    )
+                    Button("Save review") {
+                        store.saveWeeklyReview(
+                            scheduledFor: presentation.scheduledFor,
+                            reflection: reflection,
+                            nextWeekIntent: nextWeekIntent
+                        )
+                    }
+                    .buttonStyle(EchoCapsuleButtonStyle(filled: true, minHeight: 48))
+                    .disabled(!canSave)
+                    .opacity(canSave ? 1 : 0.45)
                 }
-                .buttonStyle(EchoCapsuleButtonStyle(filled: true, minHeight: 48))
-                .disabled(!canSave)
-                .opacity(canSave ? 1 : 0.45)
+                .padding(.horizontal, 20)
+                .padding(.top, 14)
+                .padding(.bottom, 12)
+                .overlay(alignment: .top) { Divider().overlay(EchoTheme.border) }
+                .transition(.move(edge: .bottom).combined(with: .opacity))
             }
-            .padding(.horizontal, 20)
-            .padding(.top, 14)
-            .padding(.bottom, 12)
-            .overlay(alignment: .top) { Divider().overlay(EchoTheme.border) }
         }
+        .animation(.easeInOut(duration: 0.2), value: focusedField)
         .foregroundStyle(EchoTheme.textPrimary)
         .background(EchoTheme.canvas.ignoresSafeArea())
         .coordinateSpace(name: "weekly-review")

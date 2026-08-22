@@ -61,35 +61,15 @@ struct LibraryView: View {
                 .background(EchoTheme.surface, in: .rect(cornerRadius: 18, style: .continuous))
                 .overlay { RoundedRectangle(cornerRadius: 18).stroke(EchoTheme.border, lineWidth: 1) }
 
-            Menu {
-                Button("All") {
-                    selectedBucket = "All"
-                    searchIsFocused = false
-                }
-                ForEach(customBuckets, id: \.name) { bucket in
-                    Button(bucket.name) {
-                        selectedBucket = bucket.name
-                        searchIsFocused = false
-                    }
-                }
-                Button("Unbucketed") {
-                    selectedBucket = "Unbucketed"
-                    searchIsFocused = false
-                }
-            } label: {
-                HStack(spacing: 6) {
-                    Text(selectedBucket)
-                        .lineLimit(1)
-                        .truncationMode(.tail)
-                    Image(systemName: "chevron.down")
-                        .font(.system(size: 10, weight: .semibold))
-                }
-                .font(.system(size: 13))
-                .foregroundStyle(selectedBucketTone.text)
-                .padding(.horizontal, 10)
-                .frame(minWidth: 72, maxWidth: 112, minHeight: 40)
-                .background(selectedBucketTone.background, in: .rect(cornerRadius: 12, style: .continuous))
-                .overlay { RoundedRectangle(cornerRadius: 12).stroke(selectedBucketTone.border, lineWidth: 1) }
+            CategoryDropdown(
+                buckets: customBuckets,
+                selectedName: selectedBucket,
+                includesAll: true,
+                includesUnbucketed: true,
+                maxTriggerWidth: 120
+            ) { bucketName in
+                selectedBucket = bucketName
+                searchIsFocused = false
             }
         }
     }
@@ -127,15 +107,8 @@ struct LibraryView: View {
         }
     }
 
-    private var selectedBucketTone: BucketTone {
-        if selectedBucket == "All" { return .neutral }
-        if selectedBucket == "Unbucketed" { return .uncategorized }
-        let key = customBuckets.first { $0.name == selectedBucket }?.colorKey ?? "slate"
-        return BucketPalette.tone(for: key)
-    }
-
     private func isLibraryNote(_ note: EchoNote) -> Bool {
-        !(note.echo.enabled && note.bucket == nil)
+        !note.echo.enabled
     }
 
     private func filtered(_ notes: [EchoNote]) -> [EchoNote] {

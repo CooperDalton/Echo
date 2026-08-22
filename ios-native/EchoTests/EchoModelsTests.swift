@@ -381,6 +381,81 @@ struct EchoModelsTests {
         #expect(try persistence.loadState().recent.first?.classificationMethod == .manual)
     }
 
+    @Test @MainActor func turningACategorizedNoteIntoAnEchoRemovesItsCategory() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let persistence = EchoPersistence(directory: directory)
+        var note = ModelFactories.note(
+            body: "An idea that should come back later",
+            echoEnabled: false,
+            existingNotes: [],
+            id: "categorized-echo"
+        )
+        note.bucket = "Ideas"
+        note.classificationStatus = .classified
+        note.classificationMethod = .manual
+        var state = NotesState.empty
+        state.recent = [note]
+        state.bucketPreferences.customs = [
+            BucketDraft(name: "Ideas", description: "Things I might build", colorKey: "mint")
+        ]
+        try persistence.saveState(state)
+        let store = EchoStore(persistence: persistence)
+
+        store.updateNote(id: note.id, body: note.body, echoEnabled: true)
+
+        #expect(store.note(id: note.id)?.echo.enabled == true)
+        #expect(store.note(id: note.id)?.bucket == nil)
+        #expect(store.note(id: note.id)?.classificationMethod == .unknown)
+        #expect(try persistence.loadState().recent.first?.bucket == nil)
+    }
+
+    @Test @MainActor func anEchoRejectsManualCategoryOverrides() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let persistence = EchoPersistence(directory: directory)
+        var state = NotesState.empty
+        let note = ModelFactories.note(
+            body: "Keep this uncategorized",
+            echoEnabled: true,
+            existingNotes: [],
+            id: "uncategorized-echo"
+        )
+        state.recent = [note]
+        state.bucketPreferences.customs = [
+            BucketDraft(name: "Ideas", description: "Things I might build", colorKey: "mint")
+        ]
+        try persistence.saveState(state)
+        let store = EchoStore(persistence: persistence)
+
+        store.overrideCategory(noteID: note.id, bucketName: "Ideas")
+
+        #expect(store.note(id: note.id)?.bucket == nil)
+        #expect(try persistence.loadState().recent.first?.bucket == nil)
+    }
+
+    @Test @MainActor func launchRemovesALegacyCategoryFromAnEcho() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let persistence = EchoPersistence(directory: directory)
+        var note = ModelFactories.note(
+            body: "An old categorized Echo",
+            echoEnabled: true,
+            existingNotes: [],
+            id: "legacy-categorized-echo"
+        )
+        note.bucket = "Ideas"
+        note.classificationMethod = .manual
+        var state = NotesState.empty
+        state.recent = [note]
+        try persistence.saveState(state)
+
+        let store = EchoStore(persistence: persistence)
+
+        #expect(store.note(id: note.id)?.bucket == nil)
+        #expect(store.note(id: note.id)?.classificationMethod == .unknown)
+    }
+
     @Test func manualCategoryOverrideWinsAgainstANewerSyncedAIResult() {
         var manualNote = ModelFactories.note(
             body: "Keep the human category",
@@ -418,6 +493,36 @@ struct EchoModelsTests {
 
         #expect(merged.recent.first?.bucket == "Reflections")
         #expect(merged.recent.first?.classificationMethod == .manual)
+    }
+
+    @Test func syncedEchoesCannotRegainALegacyCategory() {
+        var echo = ModelFactories.note(
+            body: "A synced Echo from an older client",
+            echoEnabled: true,
+            existingNotes: [],
+            id: "synced-categorized-echo"
+        )
+        echo.bucket = "Ideas"
+        echo.classificationStatus = .classified
+        echo.classificationMethod = .manual
+
+        let response = SyncResponseBody(
+            notes: [echo],
+            checkIns: nil,
+            deletedNotes: nil,
+            bucketPreferences: nil,
+            standingMessages: nil,
+            weeklyReviews: nil,
+            weeklyReviewPreferences: nil,
+            dailyCheckInPreferences: nil,
+            syncedAt: nil,
+            summary: nil
+        )
+
+        let merged = SyncMerger.merge(local: .empty, response: response)
+
+        #expect(merged.recent.first?.bucket == nil)
+        #expect(merged.recent.first?.classificationMethod == .unknown)
     }
 
     @Test @MainActor func unavailableCategorizationDoesNotLeaveNewNotePending() throws {

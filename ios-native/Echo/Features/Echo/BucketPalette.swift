@@ -50,3 +50,148 @@ struct BucketTone {
         text: EchoTheme.textSecondary
     )
 }
+
+struct CategoryDropdown: View {
+    let buckets: [BucketDraft]
+    let selectedName: String?
+    var placeholder = "Category"
+    var includesAll = false
+    var includesUnbucketed = false
+    var maxTriggerWidth: CGFloat = 180
+    var isEnabled = true
+    let onSelect: (String) -> Void
+
+    @State private var isPresented = false
+
+    private var options: [CategoryDropdownOption] {
+        var values: [CategoryDropdownOption] = []
+        if includesAll {
+            values.append(CategoryDropdownOption(value: "All", title: "All", kind: .all))
+        }
+        values.append(contentsOf: buckets.map {
+            CategoryDropdownOption(value: $0.name, title: $0.name, kind: .bucket($0.colorKey))
+        })
+        if includesUnbucketed {
+            values.append(CategoryDropdownOption(
+                value: "Unbucketed",
+                title: "Unbucketed",
+                kind: .uncategorized
+            ))
+        }
+        return values
+    }
+
+    private var selectedOption: CategoryDropdownOption? {
+        options.first { $0.value == selectedName }
+    }
+
+    var body: some View {
+        Button {
+            isPresented.toggle()
+        } label: {
+            HStack(spacing: 7) {
+                Circle()
+                    .fill(selectedOption?.swatch ?? EchoTheme.textSecondary)
+                    .frame(width: 10, height: 10)
+
+                Text(selectedOption?.title ?? placeholder)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 10, weight: .semibold))
+            }
+            .font(.system(size: 14, weight: .medium))
+            .foregroundStyle(selectedOption?.tone.text ?? BucketTone.uncategorized.text)
+            .padding(.horizontal, 12)
+            .frame(maxWidth: maxTriggerWidth, minHeight: 40)
+            .background(
+                selectedOption?.tone.background ?? BucketTone.uncategorized.background,
+                in: .capsule
+            )
+            .overlay {
+                Capsule().stroke(
+                    selectedOption?.tone.border ?? BucketTone.uncategorized.border,
+                    lineWidth: 1
+                )
+            }
+        }
+        .buttonStyle(.plain)
+        .disabled(!isEnabled || options.isEmpty)
+        .opacity(isEnabled && !options.isEmpty ? 1 : 0.5)
+        .accessibilityLabel("Category")
+        .accessibilityValue(selectedOption?.title ?? placeholder)
+        .popover(isPresented: $isPresented, attachmentAnchor: .rect(.bounds), arrowEdge: .top) {
+            ScrollView {
+                LazyVStack(spacing: 4) {
+                    ForEach(options) { option in
+                        Button {
+                            onSelect(option.value)
+                            isPresented = false
+                        } label: {
+                            HStack(spacing: 10) {
+                                Circle()
+                                    .fill(option.swatch)
+                                    .frame(width: 12, height: 12)
+
+                                Text(option.title)
+                                    .lineLimit(1)
+
+                                Spacer(minLength: 16)
+
+                                if option.value == selectedName {
+                                    Image(systemName: "checkmark")
+                                        .font(.system(size: 12, weight: .semibold))
+                                }
+                            }
+                            .font(.system(size: 15, weight: .medium))
+                            .foregroundStyle(option.tone.text)
+                            .padding(.horizontal, 12)
+                            .frame(maxWidth: .infinity, minHeight: 42, alignment: .leading)
+                            .background(
+                                option.value == selectedName ? option.tone.background : Color.clear,
+                                in: .rect(cornerRadius: 12, style: .continuous)
+                            )
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(8)
+            }
+            .frame(minWidth: 220, idealWidth: 240, maxHeight: 320)
+            .background(EchoTheme.surface)
+            .presentationCompactAdaptation(.popover)
+            .presentationBackground(EchoTheme.surface)
+        }
+    }
+}
+
+private struct CategoryDropdownOption: Identifiable {
+    enum Kind {
+        case all
+        case bucket(String)
+        case uncategorized
+    }
+
+    let value: String
+    let title: String
+    let kind: Kind
+
+    var id: String { value }
+
+    var tone: BucketTone {
+        switch kind {
+        case .all: .neutral
+        case .bucket(let colorKey): BucketPalette.tone(for: colorKey)
+        case .uncategorized: .uncategorized
+        }
+    }
+
+    var swatch: Color {
+        switch kind {
+        case .all: EchoTheme.textPrimary
+        case .bucket(let colorKey): BucketPalette.color(for: colorKey)
+        case .uncategorized: EchoTheme.textSecondary
+        }
+    }
+}

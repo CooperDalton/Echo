@@ -50,30 +50,15 @@ private struct CaptureEditorContent: View {
                 .buttonStyle(EchoRoundButtonStyle())
                 .accessibilityLabel("Back to Library")
 
-                if let existingNote {
-                    Menu {
-                        ForEach(buckets, id: \.name) { bucket in
-                            Button {
-                                store.overrideCategory(noteID: existingNote.id, bucketName: bucket.name)
-                            } label: {
-                                if existingNote.bucket == bucket.name {
-                                    Label(bucket.name, systemImage: "checkmark")
-                                } else {
-                                    Text(bucket.name)
-                                }
-                            }
-                        }
-                    } label: {
-                        Image(systemName: existingNote.classificationMethod == .manual ? "tag.fill" : "tag")
-                            .font(.system(size: 16, weight: .semibold))
-                            .foregroundStyle(categoryTone.text)
-                            .frame(width: 40, height: 40)
-                            .background(categoryTone.background, in: .circle)
-                            .overlay { Circle().stroke(categoryTone.border, lineWidth: 1) }
+                if let existingNote, !existingNote.echo.enabled {
+                    CategoryDropdown(
+                        buckets: buckets,
+                        selectedName: existingNote.bucket,
+                        maxTriggerWidth: 140,
+                        isEnabled: !buckets.isEmpty
+                    ) { bucketName in
+                        store.overrideCategory(noteID: existingNote.id, bucketName: bucketName)
                     }
-                    .disabled(buckets.isEmpty)
-                    .accessibilityLabel("Override category")
-                    .accessibilityValue(existingNote.bucket ?? "Unbucketed")
                 }
 
                 Spacer()
@@ -126,14 +111,6 @@ private struct CaptureEditorContent: View {
         }
         .onChange(of: store.selectedTab) { _, tab in if tab != .capture { text = "" } }
         .sensoryFeedback(.success, trigger: store.savePulse)
-    }
-
-    private var categoryTone: BucketTone {
-        guard
-            let bucketName = existingNote?.bucket,
-            let bucket = buckets.first(where: { $0.name == bucketName })
-        else { return .uncategorized }
-        return BucketPalette.tone(for: bucket.colorKey)
     }
 
     private func submit(echoEnabled: Bool) {

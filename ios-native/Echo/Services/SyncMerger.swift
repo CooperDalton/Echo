@@ -11,6 +11,7 @@ enum SyncMerger {
         let deletedIDs = Set(deleted.map(\.id))
         let remoteNotes = response.notes ?? []
         let notes = mergeNotes(local.allNotes, remoteNotes)
+            .map(removingCategoryFromEcho)
             .filter { !deletedIDs.contains($0.id) }
         let checkIns = mergeByID(
             local.checkIns,
@@ -83,6 +84,16 @@ enum SyncMerger {
             }
         }
         return Array(values.values)
+    }
+
+    private static func removingCategoryFromEcho(_ note: EchoNote) -> EchoNote {
+        guard note.echo.enabled, note.bucket != nil else { return note }
+        var note = note
+        note.bucket = nil
+        note.classificationStatus = .classified
+        note.classificationMethod = .unknown
+        note.classificationConfidence = nil
+        return note
     }
 
     private static func mergeByID<Value>(

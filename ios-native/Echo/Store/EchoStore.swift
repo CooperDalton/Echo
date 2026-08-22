@@ -27,7 +27,7 @@ final class EchoStore {
     init(persistence: EchoPersistence = EchoPersistence()) {
         self.persistence = persistence
         do {
-            state = try persistence.loadState()
+            state = Self.removingCategoriesFromEchoes(in: try persistence.loadState())
             persistenceError = nil
         } catch {
             state = .empty
@@ -70,11 +70,18 @@ final class EchoStore {
             )
         }
         note.echo.enabled = nextEnabled
-        let keepsManualCategory = note.classificationMethod == .manual && note.bucket != nil
+        let keepsManualCategory = !nextEnabled
+            && note.classificationMethod == .manual
+            && note.bucket != nil
         note.body = trimmed
         note.title = ModelFactories.noteTitle(from: trimmed)
         note.updatedAt = ISO8601DateFormatter.echo.string(from: .now)
-        if keepsManualCategory {
+        if nextEnabled {
+            note.bucket = nil
+            note.classificationStatus = .classified
+            note.classificationMethod = .unknown
+            note.classificationConfidence = nil
+        } else if keepsManualCategory {
             note.classificationStatus = .classified
             note.classificationConfidence = nil
         } else {
@@ -164,7 +171,8 @@ final class EchoStore {
     func overrideCategory(noteID: String, bucketName: String) {
         guard
             let bucket = state.bucketPreferences.customs.first(where: { $0.name == bucketName }),
-            var note = note(id: noteID)
+            var note = note(id: noteID),
+            !note.echo.enabled
         else { return }
 
         classificationTasks[noteID]?.cancel()
@@ -499,11 +507,29 @@ final class EchoStore {
     }
 
     private func replace(_ note: EchoNote) {
+        let note = Self.removingCategoryFromEcho(note)
         if let index = state.recent.firstIndex(where: { $0.id == note.id }) {
             state.recent[index] = note
         } else if let index = state.reviewed.firstIndex(where: { $0.id == note.id }) {
             state.reviewed[index] = note
         }
+    }
+
+    private static func removingCategoriesFromEchoes(in state: NotesState) -> NotesState {
+        var state = state
+        state.recent = state.recent.map(removingCategoryFromEcho)
+        state.reviewed = state.reviewed.map(removingCategoryFromEcho)
+        return state
+    }
+
+    private static func removingCategoryFromEcho(_ note: EchoNote) -> EchoNote {
+        guard note.echo.enabled, note.bucket != nil else { return note }
+        var note = note
+        note.bucket = nil
+        note.classificationStatus = .classified
+        note.classificationMethod = .unknown
+        note.classificationConfidence = nil
+        return note
     }
 
     private func persist(markDirty: Bool) {
