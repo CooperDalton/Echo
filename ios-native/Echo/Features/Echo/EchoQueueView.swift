@@ -475,6 +475,7 @@ private struct SwipeDeleteCard<Content: View>: View {
     let onDelete: () -> Void
     @ViewBuilder let content: Content
     @State private var offset: CGFloat = 0
+    @State private var deleteFeedback = 0
 
     var body: some View {
         ZStack(alignment: .leading) {
@@ -494,6 +495,7 @@ private struct SwipeDeleteCard<Content: View>: View {
                         .onEnded {
                             if $0.predictedEndTranslation.width > 110 {
                                 withAnimation(.snappy) { offset = 420 }
+                                deleteFeedback += 1
                                 onDelete()
                             } else {
                                 withAnimation(.snappy) { offset = 0 }
@@ -502,6 +504,7 @@ private struct SwipeDeleteCard<Content: View>: View {
                 )
         }
         .clipShape(.rect(cornerRadius: 16, style: .continuous))
+        .sensoryFeedback(.warning, trigger: deleteFeedback)
     }
 }
 

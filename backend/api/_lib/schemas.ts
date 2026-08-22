@@ -13,6 +13,8 @@ import {
   type WeeklyReviewPreferences,
 } from '../../src/contracts';
 
+const isoDateTimeSchema = z.iso.datetime({ offset: true });
+
 export const noteSchema = z.object({
   id: z.string().min(1),
   title: z.string().min(1),
@@ -68,9 +70,9 @@ export const standingMessageSchema = z.object({
 
 export const weeklyReviewSchema = z.object({
   id: z.string().min(1),
-  scheduledFor: z.string().datetime(),
-  completedAt: z.string().datetime(),
-  updatedAt: z.string().datetime(),
+  scheduledFor: isoDateTimeSchema,
+  completedAt: isoDateTimeSchema,
+  updatedAt: isoDateTimeSchema,
   reflection: z.string().trim().min(1),
   nextWeekIntent: z.string().trim().min(1),
 }) satisfies z.ZodType<WeeklyReview>;
@@ -80,8 +82,8 @@ export const weeklyReviewPreferencesSchema = z.object({
   weekday: z.number().int().min(1).max(7),
   hour: z.number().int().min(0).max(23),
   minute: z.number().int().min(0).max(59),
-  startsAt: z.string().datetime().nullable().default(null),
-  updatedAt: z.string().datetime().nullable().default(null),
+  startsAt: isoDateTimeSchema.nullable().default(null),
+  updatedAt: isoDateTimeSchema.nullable().default(null),
 }) satisfies z.ZodType<WeeklyReviewPreferences>;
 
 export const dailyCheckInPreferencesSchema = z.object({
@@ -90,7 +92,7 @@ export const dailyCheckInPreferencesSchema = z.object({
     hour: z.number().int().min(0).max(23),
     minute: z.number().int().min(0).max(59),
   })).max(5),
-  updatedAt: z.string().datetime().nullable().default(null),
+  updatedAt: isoDateTimeSchema.nullable().default(null),
 }) satisfies z.ZodType<DailyCheckInPreferences>;
 
 export const bucketDraftSchema = z.object({

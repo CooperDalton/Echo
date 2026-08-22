@@ -428,6 +428,7 @@ final class EchoStore {
             syncStatus.isSyncing = false
             syncStatus.lastSyncedAt = response.syncedAt ?? ISO8601DateFormatter.echo.string(from: .now)
             persist(markDirty: false)
+            NotificationService.clearSyncFailure()
             refreshReminderSchedule()
         } catch {
             syncStatus.isSyncing = false

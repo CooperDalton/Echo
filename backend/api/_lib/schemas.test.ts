@@ -3,7 +3,7 @@ import test from 'node:test';
 
 import { syncRequestSchema } from './schemas';
 
-test('sync accepts Swift payloads with omitted nil optionals', () => {
+test('sync accepts Swift payloads with omitted nil optionals and Supabase timestamp offsets', () => {
   const parsed = syncRequestSchema.parse({
     deviceId: 'test-device',
     snapshot: {
@@ -61,10 +61,13 @@ test('sync accepts Swift payloads with omitted nil optionals', () => {
         weekday: 1,
         hour: 18,
         minute: 0,
+        startsAt: '2026-08-11T03:55:13.565+00:00',
+        updatedAt: '2026-08-21T18:54:36.997998+00:00',
       },
       dailyCheckInPreferences: {
         enabled: true,
         times: [{ hour: 20, minute: 0 }],
+        updatedAt: '2026-08-21T18:54:37.075625+00:00',
       },
     },
   });
@@ -76,7 +79,7 @@ test('sync accepts Swift payloads with omitted nil optionals', () => {
   assert.equal(parsed.snapshot.notes[0].filePath, null);
   assert.equal(parsed.snapshot.checkIns[0].filePath, null);
   assert.equal(parsed.snapshot.deletedNotes[0].filePath, null);
-  assert.equal(parsed.snapshot.weeklyReviewPreferences.startsAt, null);
-  assert.equal(parsed.snapshot.weeklyReviewPreferences.updatedAt, null);
-  assert.equal(parsed.snapshot.dailyCheckInPreferences.updatedAt, null);
+  assert.equal(parsed.snapshot.weeklyReviewPreferences.startsAt, '2026-08-11T03:55:13.565+00:00');
+  assert.equal(parsed.snapshot.weeklyReviewPreferences.updatedAt, '2026-08-21T18:54:36.997998+00:00');
+  assert.equal(parsed.snapshot.dailyCheckInPreferences.updatedAt, '2026-08-21T18:54:37.075625+00:00');
 });

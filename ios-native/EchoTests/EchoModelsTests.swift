@@ -1,8 +1,17 @@
 import Foundation
 import Testing
+import UIKit
 @testable import Echo
 
 struct EchoModelsTests {
+    @Test func energyLevelsUseDistinctAvailableBatterySymbols() {
+        let symbols = (1...5).map(batterySymbol)
+
+        #expect(symbols == ["battery.0", "battery.25", "battery.50", "battery.75", "battery.100"])
+        #expect(Set(symbols).count == 5)
+        #expect(symbols.allSatisfy { UIImage(systemName: $0) != nil })
+    }
+
     @Test func apiErrorsIncludeTheServerReason() throws {
         let data = Data(#"{"error":"Invalid sync payload."}"#.utf8)
         let error = EchoAPIClient.requestError(status: 400, data: data)

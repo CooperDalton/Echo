@@ -163,6 +163,8 @@ private struct SwipeNoteCard: View {
     let onReviewed: (() -> Void)?
     let onDelete: () -> Void
     @State private var offset: CGFloat = 0
+    @State private var reviewFeedback = 0
+    @State private var deleteFeedback = 0
 
     var body: some View {
         ZStack {
@@ -190,9 +192,11 @@ private struct SwipeNoteCard: View {
                         let final = value.predictedEndTranslation.width
                         if final > 110 {
                             withAnimation(.snappy) { offset = 420 }
+                            deleteFeedback += 1
                             onDelete()
                         } else if final < -110, let onReviewed {
                             withAnimation(.snappy) { offset = -420 }
+                            reviewFeedback += 1
                             onReviewed()
                         } else {
                             withAnimation(.snappy) { offset = 0 }
@@ -201,6 +205,8 @@ private struct SwipeNoteCard: View {
             )
         }
         .clipShape(.rect(cornerRadius: 18, style: .continuous))
+        .sensoryFeedback(.success, trigger: reviewFeedback)
+        .sensoryFeedback(.warning, trigger: deleteFeedback)
     }
 }
 

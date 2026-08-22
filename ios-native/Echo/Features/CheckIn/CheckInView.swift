@@ -376,11 +376,14 @@ struct CheckInFlowView: View {
     }
 }
 
-private func batterySymbol(_ energy: Int) -> String {
-    if energy <= 1 { return "battery.25" }
-    if energy == 2 { return "battery.50" }
-    if energy <= 4 { return "battery.75" }
-    return "battery.100"
+func batterySymbol(_ energy: Int) -> String {
+    switch energy {
+    case ...1: "battery.0"
+    case 2: "battery.25"
+    case 3: "battery.50"
+    case 4: "battery.75"
+    default: "battery.100"
+    }
 }
 
 private func shortDate(_ raw: String) -> String {

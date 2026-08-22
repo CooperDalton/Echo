@@ -5,6 +5,7 @@ enum NotificationService {
     private static let legacyDailyIdentifier = "echo-evening-checkin"
     private static let dailyIdentifierPrefix = "echo-daily-checkin-"
     private static let weeklyIdentifier = "echo-weekly-review"
+    private static let syncFailureIdentifier = "echo-sync-failure"
 
     private static let dailyCheckInMessages = [
         "Quick vibe check: how are we doing in there?",
@@ -199,13 +200,22 @@ enum NotificationService {
     }
 
     static func notifySyncFailure(_ message: String) async {
-        let settings = await UNUserNotificationCenter.current().notificationSettings()
+        let center = UNUserNotificationCenter.current()
+        let settings = await center.notificationSettings()
         guard settings.authorizationStatus == .authorized else { return }
+        let delivered = await center.deliveredNotifications()
+        guard !delivered.contains(where: { $0.request.identifier == syncFailureIdentifier }) else { return }
         let content = UNMutableNotificationContent()
         content.title = "Sync failed"
         content.body = message
-        let request = UNNotificationRequest(identifier: "echo-sync-failure", content: content, trigger: nil)
-        try? await UNUserNotificationCenter.current().add(request)
+        let request = UNNotificationRequest(identifier: syncFailureIdentifier, content: content, trigger: nil)
+        try? await center.add(request)
+    }
+
+    static func clearSyncFailure() {
+        let center = UNUserNotificationCenter.current()
+        center.removeDeliveredNotifications(withIdentifiers: [syncFailureIdentifier])
+        center.removePendingNotificationRequests(withIdentifiers: [syncFailureIdentifier])
     }
 
     private static func canSchedule(_ status: UNAuthorizationStatus) -> Bool {
