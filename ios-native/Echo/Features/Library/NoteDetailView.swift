@@ -45,9 +45,6 @@ struct NoteDetailView: View {
         .onAppear {
             guard let note else { return }
             draft = note.body
-            if mode == .echo, EchoScheduler.isDue(note.echo) {
-                store.markReviewed(note.id)
-            }
         }
         .onChange(of: editorFocused) { wasFocused, isFocused in
             guard wasFocused, !isFocused else { return }
@@ -124,7 +121,7 @@ struct NoteDetailView: View {
         VStack(alignment: .leading, spacing: 8) {
             Text(note?.title ?? "Note unavailable")
                 .font(.system(.largeTitle, weight: .bold))
-            Text("\(note?.bucket ?? "Unbucketed") · \(echoStatus)")
+            Text("\(note?.bucket ?? "Unbucketed") · \(noteStatus)")
                 .foregroundStyle(EchoTheme.textSecondary)
         }
 
@@ -148,7 +145,7 @@ struct NoteDetailView: View {
                 .buttonStyle(EchoCapsuleButtonStyle(filled: false, minHeight: 48))
                 .frame(maxWidth: .infinity)
 
-                if note.echo.enabled {
+                if !note.echo.enabled, note.echo.state != .reviewed {
                     Button("Reviewed") {
                         store.markReviewed(note.id)
                         dismiss()
@@ -160,12 +157,8 @@ struct NoteDetailView: View {
         }
     }
 
-    private var echoStatus: String {
+    private var noteStatus: String {
         guard let note else { return "Not found" }
-        guard note.echo.enabled else { return "Echo complete" }
-        guard let date = ISO8601DateFormatter.echo.date(from: note.echo.nextDueAt) else {
-            return "Echo enabled"
-        }
-        return "Next echo \(date.formatted(.dateTime.month(.abbreviated).day()))"
+        return note.echo.state == .reviewed ? "Reviewed" : "Recent"
     }
 }

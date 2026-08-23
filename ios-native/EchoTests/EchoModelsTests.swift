@@ -1,4 +1,5 @@
 import Foundation
+import SwiftUI
 import Testing
 import UIKit
 @testable import Echo
@@ -249,6 +250,11 @@ struct EchoModelsTests {
             id: "note-widget"
         )
         note.echo.nextDueAt = ISO8601DateFormatter.echo.string(from: now)
+        let dayFormatter = DateFormatter()
+        dayFormatter.calendar = .current
+        dayFormatter.locale = Locale(identifier: "en_US_POSIX")
+        dayFormatter.dateFormat = "yyyy-MM-dd"
+        note.echo.scheduledDates = [dayFormatter.string(from: now)]
         var state = NotesState.empty
         state.recent = [note]
 
@@ -284,14 +290,11 @@ struct EchoModelsTests {
         #expect(entry?.text == message)
     }
 
-    @Test func reviewedEchoRemainsVisibleForTheDayItSurfaced() throws {
+    @Test func echoAppearsOnEveryScheduledDateWithoutReview() throws {
         var calendar = Calendar(identifier: .gregorian)
-        calendar.timeZone = try #require(TimeZone(identifier: "America/Los_Angeles"))
+        calendar.timeZone = .current
         let dueDate = try #require(calendar.date(from: DateComponents(
             year: 2026, month: 8, day: 11, hour: 9
-        )))
-        let reviewedAt = try #require(calendar.date(from: DateComponents(
-            year: 2026, month: 8, day: 11, hour: 9, minute: 29
         )))
         let laterToday = try #require(calendar.date(from: DateComponents(
             year: 2026, month: 8, day: 11, hour: 18
@@ -299,23 +302,179 @@ struct EchoModelsTests {
         let tomorrow = try #require(calendar.date(from: DateComponents(
             year: 2026, month: 8, day: 12, hour: 9
         )))
+        let secondDate = try #require(calendar.date(from: DateComponents(
+            year: 2026, month: 8, day: 15, hour: 18
+        )))
 
         var note = ModelFactories.note(
-            body: "Keep me visible today",
+            body: "Bring me back on every scheduled date",
             echoEnabled: true,
             existingNotes: [],
             now: dueDate,
-            id: "note-reviewed-today"
+            id: "note-recurring-without-review"
         )
         note.echo.nextDueAt = ISO8601DateFormatter.echo.string(from: dueDate)
-        note.echo = EchoScheduler.review(note.echo, at: reviewedAt)
+        note.echo.scheduledDates = ["2026-08-11", "2026-08-15"]
         var state = NotesState.empty
-        state.reviewed = [note]
+        state.recent = [note]
 
-        #expect(WidgetBridge.entries(from: state, now: laterToday).first?.text == "Keep me visible today")
+        #expect(WidgetBridge.entries(from: state, now: laterToday).first?.text == note.body)
         let tomorrowEntries = WidgetBridge.entries(from: state, now: tomorrow)
         #expect(tomorrowEntries.allSatisfy { $0.kind != .echo })
-        #expect(tomorrowEntries.first?.kind == .empty)
+        #expect(WidgetBridge.entries(from: state, now: secondDate).first?.text == note.body)
+    }
+
+    @Test @MainActor func openingAndLeavingADueEchoDoesNotReviewIt() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let persistence = EchoPersistence(directory: directory)
+        var note = ModelFactories.note(
+            body: "Reading this Echo should not dismiss it",
+            echoEnabled: true,
+            existingNotes: [],
+            id: "echo-opened-without-review"
+        )
+        let dueAt = Date.now.addingTimeInterval(-60)
+        note.echo.nextDueAt = ISO8601DateFormatter.echo.string(from: dueAt)
+        let dayFormatter = DateFormatter()
+        dayFormatter.calendar = .current
+        dayFormatter.locale = Locale(identifier: "en_US_POSIX")
+        dayFormatter.dateFormat = "yyyy-MM-dd"
+        note.echo.scheduledDates = [dayFormatter.string(from: dueAt)]
+        note.echo.state = .due
+        var state = NotesState.empty
+        state.recent = [note]
+        try persistence.saveState(state)
+        let store = EchoStore(persistence: persistence)
+
+        let controller = UIHostingController(
+            rootView: NoteDetailView(noteID: note.id, mode: .echo).environment(store)
+        )
+        let window = UIWindow(frame: UIScreen.main.bounds)
+        window.rootViewController = controller
+        window.makeKeyAndVisible()
+        controller.view.layoutIfNeeded()
+        await Task.yield()
+
+        window.isHidden = true
+        window.rootViewController = nil
+        await Task.yield()
+
+        let reopened = try #require(store.note(id: note.id))
+        #expect(reopened.echo.state == .due)
+        #expect(reopened.echo.occurrenceCount == 0)
+        #expect(EchoScheduler.isDue(reopened.echo))
+        #expect(store.state.recent.contains { $0.id == note.id })
+    }
+
+    @Test @MainActor func reviewMovesARegularNoteButNeverAnEcho() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let persistence = EchoPersistence(directory: directory)
+        let regularNote = ModelFactories.note(
+            body: "This regular note can be reviewed",
+            echoEnabled: false,
+            existingNotes: [],
+            id: "regular-reviewable-note"
+        )
+        var echo = ModelFactories.note(
+            body: "This Echo cannot be reviewed",
+            echoEnabled: true,
+            existingNotes: [],
+            id: "echo-never-reviewed"
+        )
+        echo.echo.nextDueAt = ISO8601DateFormatter.echo.string(
+            from: Date.now.addingTimeInterval(-60)
+        )
+        echo.echo.state = .due
+        var state = NotesState.empty
+        state.recent = [regularNote, echo]
+        try persistence.saveState(state)
+        let store = EchoStore(persistence: persistence)
+
+        store.markReviewed(regularNote.id)
+        store.markReviewed(echo.id)
+
+        #expect(store.state.reviewed.contains { $0.id == regularNote.id })
+        #expect(store.state.recent.allSatisfy { $0.id != regularNote.id })
+        let unchangedEcho = try #require(store.note(id: echo.id))
+        #expect(unchangedEcho.echo.state == .due)
+        #expect(unchangedEcho.echo.lastReviewedAt == nil)
+        #expect(store.state.recent.contains { $0.id == echo.id })
+    }
+
+    @Test @MainActor func undoRestoresADeletedNoteToItsOriginalListPosition() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let persistence = EchoPersistence(directory: directory)
+        var first = ModelFactories.note(
+            body: "First reviewed note",
+            echoEnabled: false,
+            existingNotes: [],
+            id: "reviewed-first"
+        )
+        first.echo.state = .reviewed
+        var deleted = ModelFactories.note(
+            body: "Accidentally deleted note",
+            echoEnabled: false,
+            existingNotes: [first],
+            id: "reviewed-deleted"
+        )
+        deleted.echo.state = .reviewed
+        var last = ModelFactories.note(
+            body: "Last reviewed note",
+            echoEnabled: false,
+            existingNotes: [first, deleted],
+            id: "reviewed-last"
+        )
+        last.echo.state = .reviewed
+        var state = NotesState.empty
+        state.reviewed = [first, deleted, last]
+        try persistence.saveState(state)
+        let store = EchoStore(persistence: persistence)
+
+        store.deleteNote(deleted.id)
+
+        #expect(store.state.reviewed.map(\.id) == [first.id, last.id])
+        #expect(store.state.deletedNotes.contains { $0.id == deleted.id })
+        #expect(store.pendingNoteDeletion?.message == "Note deleted")
+        #expect(try persistence.loadState().reviewed.map(\.id) == [first.id, last.id])
+
+        store.undoPendingNoteDeletion()
+
+        #expect(store.state.reviewed.map(\.id) == [first.id, deleted.id, last.id])
+        #expect(store.state.deletedNotes.allSatisfy { $0.id != deleted.id })
+        #expect(store.pendingNoteDeletion == nil)
+        #expect(try persistence.loadState().reviewed.map(\.id) == [first.id, deleted.id, last.id])
+        #expect(try persistence.loadState().deletedNotes.allSatisfy { $0.id != deleted.id })
+    }
+
+    @Test @MainActor func deletingAnEchoOffersEchoSpecificUndo() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let persistence = EchoPersistence(directory: directory)
+        let echo = ModelFactories.note(
+            body: "An Echo I might delete by mistake",
+            echoEnabled: true,
+            existingNotes: [],
+            id: "echo-delete-undo"
+        )
+        var state = NotesState.empty
+        state.recent = [echo]
+        try persistence.saveState(state)
+        let store = EchoStore(persistence: persistence)
+
+        store.deleteNote(echo.id)
+
+        let deletionID = try #require(store.pendingNoteDeletion?.id)
+        #expect(store.pendingNoteDeletion?.message == "Echo deleted")
+        #expect(store.note(id: echo.id) == nil)
+
+        store.commitPendingNoteDeletion(id: deletionID)
+
+        #expect(store.pendingNoteDeletion == nil)
+        #expect(store.state.deletedNotes.contains { $0.id == echo.id })
+        #expect(try persistence.loadState().deletedNotes.contains { $0.id == echo.id })
     }
 
     @Test @MainActor func categoryEditsRenameExistingNoteAssignments() throws {

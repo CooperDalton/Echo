@@ -1,6 +1,22 @@
 import Foundation
 import Observation
 
+struct PendingNoteDeletion: Identifiable {
+    enum Source {
+        case recent
+        case reviewed
+    }
+
+    let id = UUID()
+    let note: EchoNote
+    let source: Source
+    let index: Int
+
+    var message: String {
+        note.echo.enabled ? "Echo deleted" : "Note deleted"
+    }
+}
+
 @MainActor
 @Observable
 final class EchoStore {
@@ -17,9 +33,11 @@ final class EchoStore {
     var lastSavedTitle: String?
     var persistenceError: String?
     var weeklyReviewPresentation: WeeklyReviewPresentation?
+    var pendingNoteDeletion: PendingNoteDeletion?
 
     private let persistence: EchoPersistence
     @ObservationIgnored private var isDirty = false
+    @ObservationIgnored private var dirtyRevision = 0
     @ObservationIgnored private var autoSyncTask: Task<Void, Never>?
     @ObservationIgnored private var classificationTasks: [String: Task<Void, Never>] = [:]
     @ObservationIgnored private var classificationVersions: [String: String] = [:]
@@ -99,8 +117,9 @@ final class EchoStore {
     }
 
     func markReviewed(_ id: String) {
-        guard var note = note(id: id), note.echo.enabled else { return }
-        note.echo = EchoScheduler.review(note.echo)
+        guard var note = note(id: id), !note.echo.enabled else { return }
+        note.echo.state = .reviewed
+        note.echo.lastReviewedAt = ISO8601DateFormatter.echo.string(from: .now)
         note.updatedAt = ISO8601DateFormatter.echo.string(from: .now)
         state.recent.removeAll { $0.id == id }
         state.reviewed.removeAll { $0.id == id }
@@ -109,7 +128,25 @@ final class EchoStore {
     }
 
     func deleteNote(_ id: String) {
+        if pendingNoteDeletion != nil {
+            commitPendingNoteDeletion()
+        }
         guard let note = note(id: id) else { return }
+        let source: PendingNoteDeletion.Source
+        let index: Int
+        if let recentIndex = state.recent.firstIndex(where: { $0.id == id }) {
+            source = .recent
+            index = recentIndex
+        } else if let reviewedIndex = state.reviewed.firstIndex(where: { $0.id == id }) {
+            source = .reviewed
+            index = reviewedIndex
+        } else {
+            return
+        }
+
+        classificationTasks[id]?.cancel()
+        classificationTasks[id] = nil
+        classificationVersions[id] = nil
         state.recent.removeAll { $0.id == id }
         state.reviewed.removeAll { $0.id == id }
         let tombstone = DeletedNote(
@@ -119,7 +156,40 @@ final class EchoStore {
         )
         state.deletedNotes.removeAll { $0.id == id }
         state.deletedNotes.insert(tombstone, at: 0)
+        pendingNoteDeletion = PendingNoteDeletion(note: note, source: source, index: index)
+        autoSyncTask?.cancel()
+        isDirty = true
+        dirtyRevision += 1
+        persist(markDirty: false)
+    }
+
+    func undoPendingNoteDeletion() {
+        guard let deletion = pendingNoteDeletion else { return }
+        pendingNoteDeletion = nil
+        state.deletedNotes.removeAll { $0.id == deletion.note.id }
+        state.recent.removeAll { $0.id == deletion.note.id }
+        state.reviewed.removeAll { $0.id == deletion.note.id }
+
+        switch deletion.source {
+        case .recent:
+            state.recent.insert(deletion.note, at: min(deletion.index, state.recent.count))
+        case .reviewed:
+            state.reviewed.insert(deletion.note, at: min(deletion.index, state.reviewed.count))
+        }
+
         persist(markDirty: true)
+        if !deletion.note.echo.enabled {
+            classifyIfPossible(noteID: deletion.note.id)
+        }
+    }
+
+    func commitPendingNoteDeletion(id: UUID? = nil) {
+        guard let deletion = pendingNoteDeletion else { return }
+        guard id == nil || deletion.id == id else { return }
+        pendingNoteDeletion = nil
+        if isDirty {
+            scheduleAutoSync()
+        }
     }
 
     func addCheckIn(
@@ -427,15 +497,21 @@ final class EchoStore {
 
     func syncNow() async {
         guard config.isConfigured, !syncStatus.isSyncing else { return }
+        commitPendingNoteDeletion()
+        autoSyncTask?.cancel()
+        let syncingRevision = dirtyRevision
         syncStatus.isSyncing = true
         syncStatus.lastError = nil
         do {
             let response = try await EchoAPIClient(config: config).sync(state: state)
             state = SyncMerger.merge(local: state, response: response)
-            isDirty = false
+            isDirty = dirtyRevision != syncingRevision
             syncStatus.isSyncing = false
             syncStatus.lastSyncedAt = response.syncedAt ?? ISO8601DateFormatter.echo.string(from: .now)
             persist(markDirty: false)
+            if isDirty {
+                scheduleAutoSync()
+            }
             NotificationService.clearSyncFailure()
             refreshReminderSchedule()
         } catch {
@@ -460,6 +536,7 @@ final class EchoStore {
     }
 
     func syncBeforeBackground() async {
+        commitPendingNoteDeletion()
         guard config.isConfigured, isDirty else { return }
         autoSyncTask?.cancel()
         await syncNow()
@@ -517,18 +594,23 @@ final class EchoStore {
 
     private static func removingCategoriesFromEchoes(in state: NotesState) -> NotesState {
         var state = state
-        state.recent = state.recent.map(removingCategoryFromEcho)
-        state.reviewed = state.reviewed.map(removingCategoryFromEcho)
+        let notes = state.allNotes.map(removingCategoryFromEcho)
+        state.recent = notes.filter { $0.echo.enabled || $0.echo.state != .reviewed }
+        state.reviewed = notes.filter { !$0.echo.enabled && $0.echo.state == .reviewed }
         return state
     }
 
     private static func removingCategoryFromEcho(_ note: EchoNote) -> EchoNote {
-        guard note.echo.enabled, note.bucket != nil else { return note }
+        guard note.echo.enabled else { return note }
         var note = note
         note.bucket = nil
         note.classificationStatus = .classified
         note.classificationMethod = .unknown
         note.classificationConfidence = nil
+        note.echo.lastReviewedAt = nil
+        if note.echo.state == .reviewed {
+            note.echo.state = .new
+        }
         return note
     }
 
@@ -542,6 +624,7 @@ final class EchoStore {
         WidgetBridge.update(from: state)
         if markDirty {
             isDirty = true
+            dirtyRevision += 1
             scheduleAutoSync()
         }
     }
@@ -691,7 +774,7 @@ final class EchoStore {
     }
 
     private func scheduleAutoSync() {
-        guard config.isConfigured else { return }
+        guard config.isConfigured, pendingNoteDeletion == nil else { return }
         autoSyncTask?.cancel()
         autoSyncTask = Task { [weak self] in
             try? await Task.sleep(for: .seconds(8))

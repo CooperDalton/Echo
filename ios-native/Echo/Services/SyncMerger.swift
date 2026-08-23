@@ -27,8 +27,10 @@ enum SyncMerger {
         )
 
         return NotesState(
-            recent: notes.filter { $0.echo.state != .reviewed }.sorted { $0.createdAt > $1.createdAt },
-            reviewed: notes.filter { $0.echo.state == .reviewed }.sorted { $0.createdAt > $1.createdAt },
+            recent: notes.filter { $0.echo.enabled || $0.echo.state != .reviewed }
+                .sorted { $0.createdAt > $1.createdAt },
+            reviewed: notes.filter { !$0.echo.enabled && $0.echo.state == .reviewed }
+                .sorted { $0.createdAt > $1.createdAt },
             checkIns: checkIns.sorted { $0.createdAt > $1.createdAt },
             deletedNotes: deleted.sorted { $0.deletedAt > $1.deletedAt },
             bucketPreferences: local.bucketPreferences,
@@ -87,12 +89,16 @@ enum SyncMerger {
     }
 
     private static func removingCategoryFromEcho(_ note: EchoNote) -> EchoNote {
-        guard note.echo.enabled, note.bucket != nil else { return note }
+        guard note.echo.enabled else { return note }
         var note = note
         note.bucket = nil
         note.classificationStatus = .classified
         note.classificationMethod = .unknown
         note.classificationConfidence = nil
+        note.echo.lastReviewedAt = nil
+        if note.echo.state == .reviewed {
+            note.echo.state = .new
+        }
         return note
     }
 

@@ -40,43 +40,25 @@ enum WidgetBridge {
         }
 
         let calendar = Calendar.current
-        let today = calendar.startOfDay(for: now)
-        let tomorrow = calendar.date(byAdding: .day, value: 1, to: today) ?? now.addingTimeInterval(86_400)
-        let todayStart = ISO8601DateFormatter.echo.string(from: today)
-        let tomorrowStart = ISO8601DateFormatter.echo.string(from: tomorrow)
 
         var echoes: [WidgetEntryPayload] = []
         for note in state.allNotes {
             let targetURL = "echo://note/\(note.id.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? note.id)"
             let text = ModelFactories.compactWidgetText(note.widgetText ?? note.body)
 
-            if
-                let lastReviewedAt = note.echo.lastReviewedAt,
-                let reviewedAt = ISO8601DateFormatter.echo.date(from: lastReviewedAt),
-                calendar.isDate(reviewedAt, inSameDayAs: now)
-            {
-                echoes.append(WidgetEntryPayload(
-                    id: "echo-reviewed-today-\(note.id)",
-                    kind: .echo,
-                    text: text,
-                    targetURL: targetURL,
-                    visibleFrom: todayStart,
-                    visibleUntil: tomorrowStart
-                ))
-            }
-
             if note.echo.enabled {
-                let dueAt = ISO8601DateFormatter.echo.date(from: note.echo.nextDueAt)
-                let dueDay = dueAt.map { calendar.startOfDay(for: $0) }
-                let expiresAt = dueDay.flatMap { calendar.date(byAdding: .day, value: 1, to: $0) }
-                echoes.append(WidgetEntryPayload(
-                    id: "echo-\(note.id)",
-                    kind: .echo,
-                    text: text,
-                    targetURL: targetURL,
-                    visibleFrom: note.echo.nextDueAt,
-                    visibleUntil: expiresAt.map { ISO8601DateFormatter.echo.string(from: $0) }
-                ))
+                for occurrence in EchoScheduler.occurrences(for: note.echo) {
+                    let dueDay = calendar.startOfDay(for: occurrence.date)
+                    let expiresAt = calendar.date(byAdding: .day, value: 1, to: dueDay)
+                    echoes.append(WidgetEntryPayload(
+                        id: "echo-\(note.id)-\(occurrence.number)",
+                        kind: .echo,
+                        text: text,
+                        targetURL: targetURL,
+                        visibleFrom: ISO8601DateFormatter.echo.string(from: occurrence.date),
+                        visibleUntil: expiresAt.map { ISO8601DateFormatter.echo.string(from: $0) }
+                    ))
+                }
             }
         }
         echoes.sort { ($0.visibleFrom ?? "") < ($1.visibleFrom ?? "") }

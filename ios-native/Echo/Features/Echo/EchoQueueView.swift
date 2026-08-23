@@ -10,13 +10,17 @@ struct EchoQueueView: View {
     private var dueToday: [EchoNote] {
         store.state.allNotes
             .filter { $0.echo.enabled && $0.bucket == nil && EchoScheduler.isDue($0.echo) }
-            .sorted { $0.echo.nextDueAt < $1.echo.nextDueAt }
+            .sorted { nextOccurrenceDate($0) < nextOccurrenceDate($1) }
     }
 
     private var queue: [EchoNote] {
         store.state.allNotes
-            .filter { $0.echo.enabled && $0.bucket == nil }
-            .sorted { $0.echo.nextDueAt < $1.echo.nextDueAt }
+            .filter {
+                $0.echo.enabled
+                    && $0.bucket == nil
+                    && EchoScheduler.nextOccurrence(for: $0.echo) != nil
+            }
+            .sorted { nextOccurrenceDate($0) < nextOccurrenceDate($1) }
     }
 
     private var widgetPreviewEntries: [WidgetEntryPayload] {
@@ -351,11 +355,7 @@ struct EchoQueueView: View {
                                     .foregroundStyle(EchoTheme.textPrimary)
                                     .lineLimit(1)
                                     .frame(maxWidth: .infinity, alignment: .leading)
-                                Text(
-                                    "\(nextEchoLabel(note.echo.nextDueAt))  "
-                                    + "\(note.echo.occurrenceCount)/"
-                                    + "\(max(note.echo.scheduledDates.count, note.echo.occurrenceCount))"
-                                )
+                                Text(occurrenceLabel(for: note))
                                 .font(.system(size: 12))
                                 .foregroundStyle(EchoTheme.textSecondary)
                                 .lineLimit(1)
@@ -404,13 +404,23 @@ struct EchoQueueView: View {
         return compact.isEmpty ? note.title : compact
     }
 
-    private func nextEchoLabel(_ raw: String) -> String {
-        guard let date = ISO8601DateFormatter.echo.date(from: raw) else { return "Not scheduled" }
+    private func nextEchoLabel(_ date: Date) -> String {
         if date <= .now { return "Due now" }
         if Calendar.current.component(.year, from: date) == Calendar.current.component(.year, from: .now) {
             return date.formatted(.dateTime.month(.abbreviated).day())
         }
         return date.formatted(.dateTime.month(.abbreviated).day().year())
+    }
+
+    private func nextOccurrenceDate(_ note: EchoNote) -> Date {
+        EchoScheduler.nextOccurrence(for: note.echo)?.date ?? .distantFuture
+    }
+
+    private func occurrenceLabel(for note: EchoNote) -> String {
+        guard let occurrence = EchoScheduler.nextOccurrence(for: note.echo) else {
+            return "Complete"
+        }
+        return "\(nextEchoLabel(occurrence.date))  \(occurrence.number)/\(occurrence.total)"
     }
 
     private var weeklyReviewWeekday: String {

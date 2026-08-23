@@ -1,5 +1,11 @@
 import Foundation
 
+struct EchoOccurrence: Hashable, Sendable {
+    let date: Date
+    let number: Int
+    let total: Int
+}
+
 enum EchoScheduler {
     private static let intervalRanges = [(4, 9), (12, 18), (30, 45), (60, 90), (120, 180)]
     private static let maximumFirstAppearancesPerDay = 2
@@ -43,24 +49,36 @@ enum EchoScheduler {
         )
     }
 
-    static func review(_ schedule: EchoSchedule, at date: Date = .now) -> EchoSchedule {
-        var result = schedule
-        result.occurrenceCount = min(schedule.scheduledDates.count, max(0, schedule.occurrenceCount) + 1)
-        let nextDate = result.occurrenceCount < schedule.scheduledDates.count
-            ? schedule.scheduledDates[result.occurrenceCount]
-            : nil
-        result.enabled = nextDate != nil
-        result.state = .reviewed
-        result.lastReviewedAt = ISO8601DateFormatter.echo.string(from: date)
-        if let nextDate {
-            result.nextDueAt = dueTimestamp(for: nextDate)
-        }
-        return result
+    static func isDue(_ schedule: EchoSchedule, now: Date = .now) -> Bool {
+        guard
+            let occurrence = nextOccurrence(for: schedule, now: now),
+            calendar.isDate(occurrence.date, inSameDayAs: now)
+        else { return false }
+        return occurrence.date <= now
     }
 
-    static func isDue(_ schedule: EchoSchedule, now: Date = .now) -> Bool {
-        guard schedule.enabled else { return false }
-        return (ISO8601DateFormatter.echo.date(from: schedule.nextDueAt) ?? .distantPast) <= now
+    static func nextOccurrence(
+        for schedule: EchoSchedule,
+        now: Date = .now
+    ) -> EchoOccurrence? {
+        guard schedule.enabled else { return nil }
+        let startOfToday = calendar.startOfDay(for: now)
+        return occurrences(for: schedule).first {
+            calendar.startOfDay(for: $0.date) >= startOfToday
+        }
+    }
+
+    static func occurrences(for schedule: EchoSchedule) -> [EchoOccurrence] {
+        let dates = schedule.scheduledDates.compactMap { day in
+            ISO8601DateFormatter.echo.date(from: dueTimestamp(for: day))
+        }
+        if !dates.isEmpty {
+            return dates.enumerated().map { index, date in
+                EchoOccurrence(date: date, number: index + 1, total: dates.count)
+            }
+        }
+        guard let date = ISO8601DateFormatter.echo.date(from: schedule.nextDueAt) else { return [] }
+        return [EchoOccurrence(date: date, number: 1, total: 1)]
     }
 
     private static func dateKey(_ date: Date) -> String {

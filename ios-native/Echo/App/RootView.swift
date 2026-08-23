@@ -34,6 +34,26 @@ struct RootView: View {
         .toolbarBackground(EchoTheme.navigation, for: .tabBar)
         .toolbarBackground(.visible, for: .tabBar)
         .background(EchoTheme.canvas)
+        .overlay(alignment: .bottom) {
+            if let deletion = store.pendingNoteDeletion {
+                NoteDeletionUndoToast(message: deletion.message) {
+                    store.undoPendingNoteDeletion()
+                }
+                .padding(.horizontal, 20)
+                .padding(.bottom, 72)
+                .transition(.move(edge: .bottom).combined(with: .opacity))
+                .task(id: deletion.id) {
+                    do {
+                        try await Task.sleep(for: .seconds(5))
+                    } catch {
+                        return
+                    }
+                    guard !Task.isCancelled else { return }
+                    store.commitPendingNoteDeletion(id: deletion.id)
+                }
+            }
+        }
+        .animation(.snappy(duration: 0.25), value: store.pendingNoteDeletion?.id)
         .onOpenURL { store.handle(url: $0) }
         .task {
             store.refreshWidget()
@@ -74,5 +94,42 @@ struct RootView: View {
         .fullScreenCover(item: $store.weeklyReviewPresentation) { presentation in
             WeeklyReviewView(presentation: presentation)
         }
+    }
+}
+
+private struct NoteDeletionUndoToast: View {
+    let message: String
+    let onUndo: () -> Void
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: "trash")
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(EchoTheme.textSecondary)
+
+            Text(message)
+                .font(.system(size: 15, weight: .semibold))
+
+            Spacer(minLength: 8)
+
+            Button("Undo", action: onUndo)
+                .font(.system(size: 15, weight: .bold))
+                .foregroundStyle(EchoTheme.accent)
+                .frame(minWidth: 52, minHeight: 44)
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("note-deletion-undo")
+        }
+        .foregroundStyle(EchoTheme.textPrimary)
+        .padding(.leading, 16)
+        .padding(.trailing, 8)
+        .frame(minHeight: 56)
+        .background(EchoTheme.surfaceRaised, in: .rect(cornerRadius: 18, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .stroke(EchoTheme.border, lineWidth: 1)
+        }
+        .shadow(color: .black.opacity(0.3), radius: 14, y: 6)
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("note-deletion-toast")
     }
 }
