@@ -124,7 +124,7 @@ final class EchoStore {
         state.recent.removeAll { $0.id == id }
         state.reviewed.removeAll { $0.id == id }
         state.reviewed.insert(note, at: 0)
-        persist(markDirty: true)
+        persist(markDirty: true, refreshWidget: false)
     }
 
     func deleteNote(_ id: String) {
@@ -160,7 +160,7 @@ final class EchoStore {
         autoSyncTask?.cancel()
         isDirty = true
         dirtyRevision += 1
-        persist(markDirty: false)
+        persist(markDirty: false, refreshWidget: note.echo.enabled)
     }
 
     func undoPendingNoteDeletion() {
@@ -614,14 +614,16 @@ final class EchoStore {
         return note
     }
 
-    private func persist(markDirty: Bool) {
+    private func persist(markDirty: Bool, refreshWidget: Bool = true) {
         do {
             try persistence.saveState(state)
             persistenceError = nil
         } catch {
             persistenceError = "Changes are in memory but could not be saved: \(error.localizedDescription)"
         }
-        WidgetBridge.update(from: state)
+        if refreshWidget {
+            WidgetBridge.update(from: state)
+        }
         if markDirty {
             isDirty = true
             dirtyRevision += 1

@@ -129,6 +129,8 @@ struct LibraryView: View {
 }
 
 private struct SwipeNoteCard: View {
+    private static let exitDuration = Duration.milliseconds(220)
+
     let note: EchoNote
     let reviewed: Bool
     let bucketColorKey: String?
@@ -138,6 +140,7 @@ private struct SwipeNoteCard: View {
     @State private var offset: CGFloat = 0
     @State private var reviewFeedback = 0
     @State private var deleteFeedback = 0
+    @State private var isCompletingSwipe = false
 
     var body: some View {
         ZStack {
@@ -158,19 +161,23 @@ private struct SwipeNoteCard: View {
             .highPriorityGesture(
                 DragGesture(minimumDistance: 18)
                     .onChanged { value in
+                        guard !isCompletingSwipe else { return }
                         let translation = value.translation.width
                         offset = reviewed ? max(0, translation) : translation
                     }
                     .onEnded { value in
+                        guard !isCompletingSwipe else { return }
                         let final = value.predictedEndTranslation.width
                         if final > 110 {
-                            withAnimation(.snappy) { offset = 420 }
+                            isCompletingSwipe = true
+                            withAnimation(.snappy(duration: 0.22)) { offset = 420 }
                             deleteFeedback += 1
-                            onDelete()
+                            scheduleSwipeCompletion(onDelete)
                         } else if final < -110, let onReviewed {
-                            withAnimation(.snappy) { offset = -420 }
+                            isCompletingSwipe = true
+                            withAnimation(.snappy(duration: 0.22)) { offset = -420 }
                             reviewFeedback += 1
-                            onReviewed()
+                            scheduleSwipeCompletion(onReviewed)
                         } else {
                             withAnimation(.snappy) { offset = 0 }
                         }
@@ -180,6 +187,14 @@ private struct SwipeNoteCard: View {
         .clipShape(.rect(cornerRadius: 18, style: .continuous))
         .sensoryFeedback(.success, trigger: reviewFeedback)
         .sensoryFeedback(.warning, trigger: deleteFeedback)
+    }
+
+    private func scheduleSwipeCompletion(_ completion: @escaping @MainActor () -> Void) {
+        Task { @MainActor in
+            try? await Task.sleep(for: Self.exitDuration)
+            guard !Task.isCancelled else { return }
+            completion()
+        }
     }
 }
 

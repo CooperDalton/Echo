@@ -403,6 +403,66 @@ struct EchoModelsTests {
         #expect(store.state.recent.contains { $0.id == echo.id })
     }
 
+    @Test @MainActor func swipeMutationsReturnWithinOneFrame() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let persistence = EchoPersistence(directory: directory)
+        var state = NotesState.empty
+        state.recent = (0..<12).map { index in
+            ModelFactories.note(
+                body: String(repeating: "A", count: index == 0 ? 1_782 : 169),
+                echoEnabled: false,
+                existingNotes: [],
+                id: "swipe-performance-\(index)"
+            )
+        }
+        try persistence.saveState(state)
+        let store = EchoStore(persistence: persistence)
+        let clock = ContinuousClock()
+
+        let reviewDuration = clock.measure {
+            store.markReviewed("swipe-performance-0")
+        }
+        let deleteDuration = clock.measure {
+            store.deleteNote("swipe-performance-1")
+        }
+
+        #expect(reviewDuration < .milliseconds(4))
+        #expect(deleteDuration < .milliseconds(4))
+    }
+
+    @Test @MainActor func regularNoteSwipeMutationsDoNotChangeWidgetEntries() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let persistence = EchoPersistence(directory: directory)
+        let regularNote = ModelFactories.note(
+            body: "A regular note that never appears in the widget",
+            echoEnabled: false,
+            existingNotes: [],
+            id: "regular-widget-invariant"
+        )
+        let echo = ModelFactories.note(
+            body: "An Echo that does appear in the widget",
+            echoEnabled: true,
+            existingNotes: [regularNote],
+            id: "echo-widget-invariant"
+        )
+        var state = NotesState.empty
+        state.recent = [regularNote, echo]
+        try persistence.saveState(state)
+        let store = EchoStore(persistence: persistence)
+        let now = Date(timeIntervalSince1970: 1_788_220_800)
+        let originalEntries = WidgetBridge.entries(from: store.state, now: now)
+
+        store.markReviewed(regularNote.id)
+        let reviewedEntries = WidgetBridge.entries(from: store.state, now: now)
+        store.deleteNote(regularNote.id)
+        let deletedEntries = WidgetBridge.entries(from: store.state, now: now)
+
+        #expect(reviewedEntries == originalEntries)
+        #expect(deletedEntries == originalEntries)
+    }
+
     @Test @MainActor func undoRestoresADeletedNoteToItsOriginalListPosition() throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: directory) }
